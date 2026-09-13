@@ -1,0 +1,13 @@
+[Unit]
+Description=Agent Bus MCP public research example
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/agent-bus-mcp/env
+RuntimeDirectory=agent-bus-mcp
+Environment=AGENT_BUS_STATE_DIR=%t/agent-bus-mcp
+ExecStart=/usr/bin/env agent-bus-public-research --cadence weekly --state-dir ${AGENT_BUS_STATE_DIR} --producer-id ${AGENT_BUS_PRODUCER_ID} --worker-id ${AGENT_BUS_WORKER_ID}
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only

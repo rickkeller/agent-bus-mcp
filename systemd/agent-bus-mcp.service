@@ -1,0 +1,19 @@
+[Unit]
+Description=Agent Bus MCP bridge
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/agent-bus-mcp/env
+RuntimeDirectory=agent-bus-mcp
+Environment=AGENT_BUS_STATE_DIR=%t/agent-bus-mcp
+ExecStart=/usr/bin/env agent-bus-mcp
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=default.target

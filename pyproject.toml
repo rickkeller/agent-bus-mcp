@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-bus-mcp"
+version = "0.1.0"
+description = "Least-privilege durable task bridge for visible MCP workflows"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "Community maintainers"}]
+dependencies = ["uvicorn>=0.30"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+agent-bus-mcp = "agent_bus_mcp.mcp:main"
+agent-bus-public-research = "agent_bus_mcp.recurring:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_bus_mcp = ["research_manifest.json"]

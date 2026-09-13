@@ -1,0 +1,10 @@
+[Unit]
+Description=Schedule Agent Bus MCP public research example
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+Unit=agent-bus-public-research.service
+
+[Install]
+WantedBy=timers.target

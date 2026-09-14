@@ -4,10 +4,10 @@ Description=Agent Bus MCP public research example
 [Service]
 Type=oneshot
 EnvironmentFile=%h/.config/agent-bus-mcp/env
-RuntimeDirectory=agent-bus-mcp
-Environment=AGENT_BUS_STATE_DIR=%t/agent-bus-mcp
+# State must survive reboot; operator creates %h/.local/state/agent-bus-mcp with 0700.
 ExecStart=/usr/bin/env agent-bus-public-research --cadence weekly --state-dir ${AGENT_BUS_STATE_DIR} --producer-id ${AGENT_BUS_PRODUCER_ID} --worker-id ${AGENT_BUS_WORKER_ID}
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
+ReadWritePaths=%h/.local/state/agent-bus-mcp

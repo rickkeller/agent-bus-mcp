@@ -31,6 +31,20 @@ def test_only_the_three_task_tools_are_discoverable(tmp_path: Path) -> None:
     assert [tool["name"] for tool in TOOLS] == ["claim_task", "complete_task", "fail_task"]
 
 
+def test_tool_descriptions_document_lease_and_terminal_contract() -> None:
+    descriptions = {tool["name"]: tool["description"] for tool in TOOLS}
+    assert "900-second lease" in descriptions["claim_task"]
+    assert "status=empty" in descriptions["claim_task"]
+    assert "task_id, lease_id, and result" in descriptions["complete_task"]
+    assert "2048 bytes" in descriptions["complete_task"]
+    assert "completed or already_completed" in descriptions["complete_task"]
+    assert "stale or mismatched leases" in descriptions["complete_task"]
+    assert "task_id and lease_id" in descriptions["fail_task"]
+    assert "no result" in descriptions["fail_task"]
+    assert "failed or already_failed" in descriptions["fail_task"]
+    assert "stale or mismatched leases" in descriptions["fail_task"]
+
+
 def test_mcp_authentication_and_task_lifecycle(tmp_path: Path) -> None:
     queue = DurableQueue(tmp_path)
     task_id = queue.enqueue(goal="read", references=[], idempotency_key="mcp")

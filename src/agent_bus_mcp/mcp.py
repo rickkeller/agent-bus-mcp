@@ -13,9 +13,9 @@ from .queue import DurableQueue
 
 MAX_BODY_BYTES = 16 * 1024
 TOOLS = (
-    {"name": "claim_task", "description": "Claim one visible task lease.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "complete_task", "description": "Complete the exact active lease.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}, "result": {"type": "string", "maxLength": 2048}}, "required": ["task_id", "lease_id", "result"], "additionalProperties": False}},
-    {"name": "fail_task", "description": "Fail the exact active lease without a payload.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}}, "required": ["task_id", "lease_id"], "additionalProperties": False}},
+    {"name": "claim_task", "description": "Claim one pending or expired-lease task for the configured worker. No arguments. On success returns status=claimed with task_id, goal, references, lease_id, and lease_expires_at for a 900-second lease. If none is available returns status=empty.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "complete_task", "description": "Complete the exact active lease. Requires task_id, lease_id, and result (maximum 2048 bytes); returns completed or already_completed. Refuses stale or mismatched leases.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}, "result": {"type": "string", "maxLength": 2048}}, "required": ["task_id", "lease_id", "result"], "additionalProperties": False}},
+    {"name": "fail_task", "description": "Fail the exact active lease. Requires task_id and lease_id, with no result; returns failed or already_failed. Refuses stale or mismatched leases.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}}, "required": ["task_id", "lease_id"], "additionalProperties": False}},
 )
 
 

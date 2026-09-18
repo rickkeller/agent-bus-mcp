@@ -2,7 +2,7 @@
 
 Keep the bearer token only in a private env file, never in source control; rotate it immediately after suspected exposure. Tokens never belong in git. Keep persistent queue state in an operator-created 0700 directory.
 
-The bridge binds to loopback. Remote access requires an operator-controlled, authenticated TLS reverse proxy. Reference validation accepts only syntactic public HTTPS; it does not establish source safety or trustworthiness. Treat goals, references, fetched material, and results as untrusted input.
+The bridge binds to loopback. Remote access requires an operator-controlled, authenticated TLS reverse proxy. Reference validation accepts only syntactic public HTTPS; it does not establish source safety or trustworthiness. Treat task goals, references, results, consultation questions, origin references, and answers as untrusted input. Consultation schemas provide no fields for routing, attachments, task state, or execution authority. Do not put commands or credentials in consultation free text; answers remain advice-only and cannot change task state.
 
 The public-research producer and its manifest are an example workload, not the product. Its reserved `.invalid` reference must not be treated as live content.
 

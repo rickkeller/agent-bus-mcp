@@ -17,9 +17,14 @@ MAX_GOAL_BYTES = 4096
 MAX_RESULT_BYTES = 2048
 MAX_REFERENCES = 4
 MAX_REFERENCE_BYTES = 2048
+MAX_QUESTION_BYTES = 2048
+MAX_ANSWER_BYTES = 2048
+MAX_ORIGIN_REF_BYTES = 256
+MAX_CONSULTATION_SECONDS = 86400
 LEASE_SECONDS = 900
 _TASK_PREFIX = "task_"
 _LEASE_PREFIX = "lease_"
+_CONSULTATION_PREFIX = "consultation_"
 
 
 class QueueRefused(ValueError):
@@ -35,6 +40,26 @@ def _now() -> datetime:
 
 def _stamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _instant(value: datetime | None) -> datetime:
+    if value is None:
+        return _now()
+    if not isinstance(value, datetime) or value.utcoffset() is None:
+        raise QueueRefused()
+    return value.astimezone(timezone.utc)
+
+
+def _parse_stamp(value: object) -> datetime:
+    try:
+        if not isinstance(value, str):
+            raise ValueError
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.utcoffset() is None:
+            raise ValueError
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError) as exc:
+        raise QueueRefused() from exc
 
 
 def _public_https(value: str) -> bool:
@@ -80,6 +105,8 @@ class DurableQueue:
         os.chmod(self.root, 0o700)
         (self.root / "tasks").mkdir(exist_ok=True, mode=0o700)
         (self.root / "idempotency").mkdir(exist_ok=True, mode=0o700)
+        (self.root / "consultations").mkdir(exist_ok=True, mode=0o700)
+        (self.root / "consultation_idempotency").mkdir(exist_ok=True, mode=0o700)
         self._lock_path = self.root / ".queue.lock"
 
     @contextmanager
@@ -93,6 +120,9 @@ class DurableQueue:
 
     def _path(self, task_id: str) -> Path:
         return self.root / "tasks" / f"{task_id}.json"
+
+    def _consultation_path(self, consultation_id: str) -> Path:
+        return self.root / "consultations" / f"{consultation_id}.json"
 
     def _write(self, path: Path, value: dict) -> None:
         temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
@@ -133,6 +163,174 @@ class DurableQueue:
             self._write(self._path(task_id), task)
             self._write(key_path, {"task_id": task_id})
             return task_id
+
+    def ask_question(
+        self,
+        *,
+        question: str,
+        origin_ref: str,
+        idempotency_key: str,
+        expires_in_seconds: int,
+        now: datetime | None = None,
+        producer_id: str | None = None,
+    ) -> dict:
+        """Create an advice-only consultation from the configured local producer."""
+        producer = self.producer_id if producer_id is None else producer_id
+        if (
+            producer != self.producer_id
+            or not _safe_text(question, MAX_QUESTION_BYTES)
+            or not _safe_text(origin_ref, MAX_ORIGIN_REF_BYTES)
+            or not isinstance(idempotency_key, str)
+            or idempotency_key in ("", ".", "..")
+            or len(idempotency_key) > 160
+            or not all(char.isalnum() or char in "._-" for char in idempotency_key)
+            or not isinstance(expires_in_seconds, int)
+            or isinstance(expires_in_seconds, bool)
+            or not 1 <= expires_in_seconds <= MAX_CONSULTATION_SECONDS
+        ):
+            raise QueueRefused()
+        instant = _instant(now)
+        with self._locked():
+            key_path = self.root / "consultation_idempotency" / idempotency_key
+            if key_path.exists():
+                existing_id = self._read(key_path)["consultation_id"]
+                return self._read(self._consultation_path(existing_id))
+            consultation_id = f"{_CONSULTATION_PREFIX}{secrets.token_hex(16)}"
+            record = {
+                "consultation_id": consultation_id,
+                "producer_id": producer,
+                "worker_id": self.worker_id,
+                "origin_ref": origin_ref,
+                "idempotency_key": idempotency_key,
+                "question": question,
+                "status": "pending",
+                "created_at": _stamp(instant),
+                "expires_at": _stamp(instant + timedelta(seconds=expires_in_seconds)),
+                "lease_id": None,
+                "lease_expires_at": None,
+                "claimed_at": None,
+                "answer": None,
+                "answered_at": None,
+            }
+            self._write(self._consultation_path(consultation_id), record)
+            self._write(key_path, {"consultation_id": consultation_id})
+            return record
+
+    def read_answer(
+        self,
+        consultation_id: str,
+        *,
+        producer_id: str | None = None,
+        now: datetime | None = None,
+    ) -> dict:
+        """Read consultation state through the configured local producer route."""
+        producer = self.producer_id if producer_id is None else producer_id
+        if (
+            producer != self.producer_id
+            or not isinstance(consultation_id, str)
+            or not _identifier(consultation_id, _CONSULTATION_PREFIX)
+        ):
+            raise QueueRefused()
+        instant = _instant(now)
+        with self._locked():
+            record = self._read(self._consultation_path(consultation_id))
+            if record.get("producer_id") != producer:
+                raise QueueRefused()
+            if record.get("status") in ("pending", "leased") and _parse_stamp(record.get("expires_at")) <= instant:
+                record["status"] = "expired"
+                self._write(self._consultation_path(consultation_id), record)
+            return record
+
+    def _consultations(self) -> list[dict]:
+        return [
+            self._read(path)
+            for path in sorted((self.root / "consultations").glob("consultation_*.json"))
+        ]
+
+    def claim_question(
+        self,
+        now: datetime | None = None,
+        *,
+        worker_id: str | None = None,
+    ) -> dict | None:
+        """Claim one pending or expired-lease consultation for the configured worker."""
+        worker = self.worker_id if worker_id is None else worker_id
+        if worker != self.worker_id:
+            raise QueueRefused()
+        instant = _instant(now)
+        with self._locked():
+            for record in self._consultations():
+                expires_at = _parse_stamp(record.get("expires_at"))
+                if record.get("status") in ("pending", "leased") and expires_at <= instant:
+                    record["status"] = "expired"
+                    self._write(self._consultation_path(record["consultation_id"]), record)
+                    continue
+                lease_expired = (
+                    record.get("status") == "leased"
+                    and _parse_stamp(record.get("lease_expires_at")) <= instant
+                )
+                if record.get("status") != "pending" and not lease_expired:
+                    continue
+                record["status"] = "leased"
+                record["lease_id"] = f"{_LEASE_PREFIX}{secrets.token_hex(16)}"
+                record["lease_expires_at"] = _stamp(
+                    min(instant + timedelta(seconds=LEASE_SECONDS), expires_at)
+                )
+                record["claimed_at"] = _stamp(instant)
+                self._write(self._consultation_path(record["consultation_id"]), record)
+                return {
+                    key: record[key]
+                    for key in (
+                        "consultation_id",
+                        "origin_ref",
+                        "question",
+                        "expires_at",
+                        "lease_id",
+                        "lease_expires_at",
+                    )
+                }
+        return None
+
+    def answer_question(
+        self,
+        *,
+        consultation_id: str,
+        lease_id: str,
+        answer: str,
+        now: datetime | None = None,
+        worker_id: str | None = None,
+    ) -> str:
+        """Store a bounded answer for a claimed consultation."""
+        worker = self.worker_id if worker_id is None else worker_id
+        if (
+            worker != self.worker_id
+            or not isinstance(consultation_id, str)
+            or not _identifier(consultation_id, _CONSULTATION_PREFIX)
+            or not isinstance(lease_id, str)
+            or not _identifier(lease_id, _LEASE_PREFIX)
+            or not _safe_text(answer, MAX_ANSWER_BYTES)
+        ):
+            raise QueueRefused()
+        instant = _instant(now)
+        with self._locked():
+            record = self._read(self._consultation_path(consultation_id))
+            expires_at = _parse_stamp(record.get("expires_at"))
+            if expires_at <= instant and record.get("status") in ("pending", "leased"):
+                record["status"] = "expired"
+                self._write(self._consultation_path(consultation_id), record)
+                raise QueueRefused()
+            if (
+                record.get("worker_id") != worker
+                or record.get("status") != "leased"
+                or record.get("lease_id") != lease_id
+                or _parse_stamp(record.get("lease_expires_at")) <= instant
+            ):
+                raise QueueRefused()
+            record["status"] = "answered"
+            record["answer"] = answer
+            record["answered_at"] = _stamp(instant)
+            self._write(self._consultation_path(consultation_id), record)
+            return "answered"
 
     def _tasks(self) -> list[dict]:
         return [self._read(path) for path in sorted((self.root / "tasks").glob("task_*.json"))]

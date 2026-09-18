@@ -24,11 +24,17 @@ def _request(app: MCPApplication, headers: list[tuple[bytes, bytes]], body: byte
     return sent
 
 
-def test_only_the_three_task_tools_are_discoverable(tmp_path: Path) -> None:
+def test_only_the_closed_task_and_consultation_tools_are_discoverable(tmp_path: Path) -> None:
     app = MCPApplication(DurableQueue(tmp_path), "synthetic-secret")
     response = app._dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
     assert [tool["name"] for tool in response["result"]["tools"]] == [tool["name"] for tool in TOOLS]
-    assert [tool["name"] for tool in TOOLS] == ["claim_task", "complete_task", "fail_task"]
+    assert [tool["name"] for tool in TOOLS] == [
+        "claim_task",
+        "complete_task",
+        "fail_task",
+        "claim_question",
+        "answer_question",
+    ]
 
 
 def test_tool_descriptions_document_lease_and_terminal_contract() -> None:
@@ -43,6 +49,30 @@ def test_tool_descriptions_document_lease_and_terminal_contract() -> None:
     assert "no result" in descriptions["fail_task"]
     assert "failed or already_failed" in descriptions["fail_task"]
     assert "stale or mismatched leases" in descriptions["fail_task"]
+    assert "advice-only" in descriptions["claim_question"]
+    assert "status=empty" in descriptions["claim_question"]
+    assert "exact active lease" in descriptions["answer_question"]
+    assert "exactly once" in descriptions["answer_question"]
+
+
+def test_consultation_schemas_are_closed_and_advice_only() -> None:
+    schemas = {tool["name"]: tool["inputSchema"] for tool in TOOLS}
+    assert schemas["claim_question"] == {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    }
+    assert set(schemas["answer_question"]["properties"]) == {
+        "consultation_id",
+        "lease_id",
+        "answer",
+    }
+    assert schemas["answer_question"]["required"] == [
+        "consultation_id",
+        "lease_id",
+        "answer",
+    ]
+    assert schemas["answer_question"]["additionalProperties"] is False
 
 
 def test_mcp_authentication_and_task_lifecycle(tmp_path: Path) -> None:
@@ -65,6 +95,8 @@ def test_mcp_refuses_unknown_or_malformed_tools(tmp_path: Path) -> None:
         {"name": "enqueue", "arguments": {}},
         {"name": "claim_task", "arguments": {"extra": True}},
         {"name": "complete_task", "arguments": {}},
+        {"name": "claim_question", "arguments": {"destination": "elsewhere"}},
+        {"name": "answer_question", "arguments": {"consultation_id": "x", "lease_id": "y", "answer": "z", "task_complete": True}},
     ):
         response = app._dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
         assert response["error"]["message"] == "request refused"

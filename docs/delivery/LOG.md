@@ -1,0 +1,10 @@
+# Delivery Log
+
+- Plan v1 / P1 started: admitted a bounded offline consultation-lane package; source state was clean at the required starting commit. Next state: PRECODE review.
+- Evidence: phase validator reported `PRECODE PASS` before production edits.
+- Plan v1 / P2 evidence: the inherited checkpoint recorded strict RED→GREEN for durable/idempotent local ask, MCP ask→claim→answer→read, and the negative family; closure review found the implementation confined to the accepted consultation lane.
+- Evidence: `python3 -m pytest -q tests/test_consultation.py tests/test_queue.py tests/test_mcp.py` passed 35 tests; `python3 -m pytest -q` passed the full 36-test suite.
+- Plan v1 / P3 evidence: the README first screen distinguishes a quick question from a formal task with a weekly-update example, while retaining installation, loopback/TLS, authentication, persistence, protocol, lease, idempotency, and trust-boundary facts. One overbroad free-text claim was narrowed to match the schema and implementation.
+- Evidence: `python3 /tmp/check_agent_bus_compat.py .` reported five closed MCP schemas consistent with the README and AST-identical formal task schemas, dispatch branches, and queue methods relative to the starting commit.
+- Plan v1 / P4 verification: `python3 -m py_compile src/agent_bus_mcp/*.py`, `git diff --check`, and the delivery validator passed. The deterministic tracked-tree plus complete-history scan covered 61 items / 117124 bytes with zero suspicious findings; its 3 bearer-value and 22 high-entropy hits were all recognized intentional fake placeholders/examples, not credentials.
+- Evidence: implementation and verification exits are reviewed. Release and acceptance remain blocked for the parent-owned push and public readback; this slice performs neither.

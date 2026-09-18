@@ -16,6 +16,8 @@ TOOLS = (
     {"name": "claim_task", "description": "Claim one pending or expired-lease task for the configured worker. No arguments. On success returns status=claimed with task_id, goal, references, lease_id, and lease_expires_at for a 900-second lease. If none is available returns status=empty.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "complete_task", "description": "Complete the exact active lease. Requires task_id, lease_id, and result (maximum 2048 bytes); returns completed or already_completed. Refuses stale or mismatched leases.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}, "result": {"type": "string", "maxLength": 2048}}, "required": ["task_id", "lease_id", "result"], "additionalProperties": False}},
     {"name": "fail_task", "description": "Fail the exact active lease. Requires task_id and lease_id, with no result; returns failed or already_failed. Refuses stale or mismatched leases.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}}, "required": ["task_id", "lease_id"], "additionalProperties": False}},
+    {"name": "claim_question", "description": "Claim one pending advice-only question for the configured worker. No arguments. Returns status=claimed with the bounded question and lease, or status=empty.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "answer_question", "description": "Answer the exact active lease exactly once. Requires consultation_id, lease_id, and a bounded answer; stale, mismatched, expired, or already answered consultations are refused.", "inputSchema": {"type": "object", "properties": {"consultation_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}, "answer": {"type": "string", "maxLength": 2048}}, "required": ["consultation_id", "lease_id", "answer"], "additionalProperties": False}},
 )
 
 
@@ -102,6 +104,19 @@ class MCPApplication:
             result = {"status": self.queue.finish(task_id=arguments["task_id"], lease_id=arguments["lease_id"], result=arguments["result"], failed=False, worker_id=self.worker_id), "task_id": arguments["task_id"]}
         elif name == "fail_task" and set(arguments) == {"task_id", "lease_id"}:
             result = {"status": self.queue.finish(task_id=arguments["task_id"], lease_id=arguments["lease_id"], result=None, failed=True, worker_id=self.worker_id), "task_id": arguments["task_id"]}
+        elif name == "claim_question" and not arguments:
+            claimed = self.queue.claim_question(worker_id=self.worker_id)
+            result = {"status": "empty"} if claimed is None else {"status": "claimed", **claimed}
+        elif name == "answer_question" and set(arguments) == {"consultation_id", "lease_id", "answer"}:
+            result = {
+                "status": self.queue.answer_question(
+                    consultation_id=arguments["consultation_id"],
+                    lease_id=arguments["lease_id"],
+                    answer=arguments["answer"],
+                    worker_id=self.worker_id,
+                ),
+                "consultation_id": arguments["consultation_id"],
+            }
         else:
             return _error(request_id)
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": json.dumps(result, separators=(",", ":"))}], "structuredContent": result}}

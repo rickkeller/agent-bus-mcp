@@ -1,4 +1,4 @@
-"""A small least-privilege durable task queue and MCP bridge."""
+"""A small bridge for quick agent questions and bounded tasks."""
 
 from .queue import DurableQueue, QueueRefused
 

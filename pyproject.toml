@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-bus-mcp"
 version = "0.1.0"
-description = "Least-privilege durable task bridge for visible MCP workflows"
+description = "A small bridge for agents to ask quick questions or hand off bounded tasks"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

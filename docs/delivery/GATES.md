@@ -42,4 +42,4 @@ Verification-evidence: Focused 35 passed; full 36 passed; py_compile, diff check
 IMPLEMENT_EXIT: REVIEWED
 VERIFY_EXIT: REVIEWED
 RELEASE_EXIT: REVIEWED
-ACCEPT_EXIT: BLOCKED: Public acceptance requires successful push plus remote main, README, visibility, URL, and description readback.
+ACCEPT_EXIT: REVIEWED

@@ -100,6 +100,22 @@ def test_authority_identities_use_ascii_grammar() -> None:
         )
 
 
+@pytest.mark.parametrize("route_part", ("source", "destination", "mode"))
+def test_route_policy_requires_exact_builtin_route_scalars(route_part: str) -> None:
+    class TextSubclass(str):
+        pass
+
+    source = TextSubclass("producer") if route_part == "source" else "producer"
+    destination = TextSubclass("worker") if route_part == "destination" else "worker"
+    mode = TextSubclass("task") if route_part == "mode" else "task"
+
+    with pytest.raises(QueueRefused, match="^request refused$"):
+        _policy(
+            {"producer", "worker"},
+            {(source, destination): {mode}},
+        )
+
+
 def test_constructor_identities_refuse_non_ascii_before_state_creation(tmp_path: Path) -> None:
     confusable_worker = "w\u043erker"
     legacy_root = tmp_path / "legacy"
@@ -400,6 +416,88 @@ def test_incompatible_policy_refuses_parent_format_before_mutation(
     )
     before = _parent_record_bytes(root)
     policy = _policy({"producer", "worker", "other"}, routes)
+
+    with pytest.raises(QueueRefused, match="^request refused$"):
+        DurableQueue(root, policy=policy, agent_id="producer")
+
+    assert not (root / "policy.json").exists()
+    assert _parent_record_bytes(root) == before
+
+
+@pytest.mark.parametrize(
+    ("directory", "record_id"),
+    (
+        ("tasks", "task_" + "1" * 32),
+        ("consultations", "consultation_" + "2" * 32),
+    ),
+    ids=("task", "consultation"),
+)
+def test_non_object_parent_record_is_refused_before_mutation(
+    tmp_path: Path, directory: str, record_id: str
+) -> None:
+    root = tmp_path / "parent"
+    _create_parent_format_state(root)
+    (root / directory / f"{record_id}.json").write_text("[]", encoding="utf-8")
+    before = _parent_record_bytes(root)
+    policy = _policy(
+        {"producer", "worker"},
+        {("producer", "worker"): {"task", "consultation"}},
+    )
+
+    with pytest.raises(QueueRefused, match="^request refused$"):
+        DurableQueue(root, policy=policy, agent_id="producer")
+
+    assert not (root / "policy.json").exists()
+    assert _parent_record_bytes(root) == before
+
+
+@pytest.mark.parametrize(
+    ("directory", "record_id", "field"),
+    (
+        *(
+            ("tasks", "task_" + "1" * 32, field)
+            for field in (
+                "task_id",
+                "goal",
+                "status",
+                "lease_id",
+                "lease_expires_at",
+                "result",
+            )
+        ),
+        *(
+            ("consultations", "consultation_" + "2" * 32, field)
+            for field in (
+                "consultation_id",
+                "origin_ref",
+                "idempotency_key",
+                "question",
+                "status",
+                "created_at",
+                "expires_at",
+                "lease_id",
+                "lease_expires_at",
+                "claimed_at",
+                "answer",
+                "answered_at",
+            )
+        ),
+    ),
+)
+def test_parent_record_requires_expected_scalar_types_before_policy_write(
+    tmp_path: Path, directory: str, record_id: str, field: str
+) -> None:
+    root = tmp_path / "parent"
+    _create_parent_format_state(root)
+    record_path = root / directory / f"{record_id}.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record[field] = 7
+    _write_parent_record(record_path, record)
+    before = _parent_record_bytes(root)
+    policy = _policy(
+        {"producer", "worker"},
+        {("producer", "worker"): {"task", "consultation"}},
+    )
 
     with pytest.raises(QueueRefused, match="^request refused$"):
         DurableQueue(root, policy=policy, agent_id="producer")

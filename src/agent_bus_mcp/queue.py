@@ -99,6 +99,66 @@ def _identity(value: object) -> TypeGuard[str]:
     )
 
 
+def _optional_parent_identifier(value: object, prefix: str) -> bool:
+    return value is None or (type(value) is str and _identifier(value, prefix))
+
+
+def _optional_parent_text(value: object, maximum_bytes: int) -> bool:
+    return value is None or (type(value) is str and _safe_text(value, maximum_bytes))
+
+
+def _parent_stamp(value: object, *, optional: bool = False) -> bool:
+    if value is None:
+        return optional
+    if type(value) is not str:
+        return False
+    _parse_stamp(value)
+    return True
+
+
+def _valid_parent_record(record: dict, mode: str) -> bool:
+    if mode == "task":
+        references = record.get("references")
+        return (
+            type(record.get("task_id")) is str
+            and _identifier(record["task_id"], _TASK_PREFIX)
+            and type(record.get("goal")) is str
+            and _safe_text(record["goal"], MAX_GOAL_BYTES)
+            and type(references) is list
+            and len(references) <= MAX_REFERENCES
+            and all(type(item) is str and _public_https(item) for item in references)
+            and type(record.get("status")) is str
+            and record["status"] in ("pending", "leased", "completed", "failed")
+            and _optional_parent_identifier(record.get("lease_id"), _LEASE_PREFIX)
+            and _parent_stamp(record.get("lease_expires_at"), optional=True)
+            and _optional_parent_text(record.get("result"), MAX_RESULT_BYTES)
+        )
+    if mode == "consultation":
+        idempotency_key = record.get("idempotency_key")
+        return (
+            type(record.get("consultation_id")) is str
+            and _identifier(record["consultation_id"], _CONSULTATION_PREFIX)
+            and type(record.get("origin_ref")) is str
+            and _safe_text(record["origin_ref"], MAX_ORIGIN_REF_BYTES)
+            and type(idempotency_key) is str
+            and idempotency_key not in ("", ".", "..")
+            and len(idempotency_key) <= 160
+            and all(char.isalnum() or char in "._-" for char in idempotency_key)
+            and type(record.get("question")) is str
+            and _safe_text(record["question"], MAX_QUESTION_BYTES)
+            and type(record.get("status")) is str
+            and record["status"] in ("pending", "leased", "answered", "expired")
+            and _parent_stamp(record.get("created_at"))
+            and _parent_stamp(record.get("expires_at"))
+            and _optional_parent_identifier(record.get("lease_id"), _LEASE_PREFIX)
+            and _parent_stamp(record.get("lease_expires_at"), optional=True)
+            and _parent_stamp(record.get("claimed_at"), optional=True)
+            and _optional_parent_text(record.get("answer"), MAX_ANSWER_BYTES)
+            and _parent_stamp(record.get("answered_at"), optional=True)
+        )
+    return False
+
+
 class RoutePolicy:
     """Immutable local authority graph for directional agent routes."""
 
@@ -139,9 +199,12 @@ class RoutePolicy:
             if (
                 not isinstance(edge, tuple)
                 or len(edge) != 2
+                or not _identity(source)
+                or not _identity(destination)
                 or source not in configured_agents
                 or destination not in configured_agents
                 or not allowed_modes
+                or not all(type(mode) is str for mode in allowed_modes)
                 or not allowed_modes <= _ROUTE_MODES
             ):
                 raise QueueRefused()
@@ -229,6 +292,8 @@ class DurableQueue:
                     (self._consultations(), "consultation"),
                 ):
                     for record in records:
+                        if type(record) is not dict or not _valid_parent_record(record, mode):
+                            raise QueueRefused()
                         source = record.get("producer_id")
                         destination = record.get("worker_id")
                         if (

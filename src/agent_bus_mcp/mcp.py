@@ -28,13 +28,10 @@ def _error(request_id: Any, code: int = -32600) -> dict:
 class MCPApplication:
     """ASGI app: authenticate before buffering/parsing a request body."""
 
-    def __init__(self, queue: DurableQueue, bearer_secret: str, *, worker_id: str | None = None) -> None:
+    def __init__(self, queue: DurableQueue, bearer_secret: str) -> None:
         if not bearer_secret:
             raise ValueError("authentication secret required")
         self.queue, self.bearer_secret = queue, bearer_secret
-        self.worker_id = queue.worker_id if worker_id is None else worker_id
-        if self.worker_id != queue.worker_id:
-            raise ValueError("worker route is not configured")
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         try:
@@ -98,14 +95,14 @@ class MCPApplication:
             return _error(request_id)
         name, arguments = params["name"], params["arguments"]
         if name == "claim_task" and not arguments:
-            claimed = self.queue.claim(worker_id=self.worker_id)
+            claimed = self.queue.claim()
             result = {"status": "empty"} if claimed is None else {"status": "claimed", **claimed}
         elif name == "complete_task" and set(arguments) == {"task_id", "lease_id", "result"}:
-            result = {"status": self.queue.finish(task_id=arguments["task_id"], lease_id=arguments["lease_id"], result=arguments["result"], failed=False, worker_id=self.worker_id), "task_id": arguments["task_id"]}
+            result = {"status": self.queue.finish(task_id=arguments["task_id"], lease_id=arguments["lease_id"], result=arguments["result"], failed=False), "task_id": arguments["task_id"]}
         elif name == "fail_task" and set(arguments) == {"task_id", "lease_id"}:
-            result = {"status": self.queue.finish(task_id=arguments["task_id"], lease_id=arguments["lease_id"], result=None, failed=True, worker_id=self.worker_id), "task_id": arguments["task_id"]}
+            result = {"status": self.queue.finish(task_id=arguments["task_id"], lease_id=arguments["lease_id"], result=None, failed=True), "task_id": arguments["task_id"]}
         elif name == "claim_question" and not arguments:
-            claimed = self.queue.claim_question(worker_id=self.worker_id)
+            claimed = self.queue.claim_question()
             result = {"status": "empty"} if claimed is None else {"status": "claimed", **claimed}
         elif name == "answer_question" and set(arguments) == {"consultation_id", "lease_id", "answer"}:
             result = {
@@ -113,7 +110,6 @@ class MCPApplication:
                     consultation_id=arguments["consultation_id"],
                     lease_id=arguments["lease_id"],
                     answer=arguments["answer"],
-                    worker_id=self.worker_id,
                 ),
                 "consultation_id": arguments["consultation_id"],
             }
@@ -154,7 +150,7 @@ def main() -> int:
         raise SystemExit("only loopback binding is supported")
     loopback = str(126 + 1) + ".0.0.1"
     queue = DurableQueue(Path(state), producer_id=producer_id, worker_id=worker_id)
-    uvicorn.run(MCPApplication(queue, bearer_secret, worker_id=worker_id), host=loopback, port=port)
+    uvicorn.run(MCPApplication(queue, bearer_secret), host=loopback, port=port)
     return 0
 
 

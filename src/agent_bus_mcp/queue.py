@@ -1,4 +1,4 @@
-"""Durable local queue with a single lock, leases, and completion fences."""
+"""Durable local policy graph with a single lock, leases, and fences."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ import json
 import os
 from pathlib import Path
 import secrets
-from typing import Iterator
+from types import MappingProxyType
+from typing import Iterable, Iterator, Mapping
 import unicodedata
 from urllib.parse import urlsplit
 
@@ -25,6 +26,7 @@ LEASE_SECONDS = 900
 _TASK_PREFIX = "task_"
 _LEASE_PREFIX = "lease_"
 _CONSULTATION_PREFIX = "consultation_"
+_ROUTE_MODES = frozenset(("task", "consultation"))
 
 
 class QueueRefused(ValueError):
@@ -93,14 +95,118 @@ def _identity(value: str) -> bool:
     return isinstance(value, str) and 1 <= len(value) <= 64 and all(char.isalnum() or char in "_-" for char in value)
 
 
+class RoutePolicy:
+    """Immutable local authority graph for directional agent routes."""
+
+    __slots__ = ("agents", "routes", "_frozen")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_frozen", False):
+            raise AttributeError("RoutePolicy is immutable")
+        object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("RoutePolicy is immutable")
+
+    def __init__(
+        self,
+        *,
+        agents: Iterable[str],
+        routes: Mapping[tuple[str, str], Iterable[str]],
+    ) -> None:
+        try:
+            configured_agents = frozenset(agents)
+        except TypeError as exc:
+            raise QueueRefused() from exc
+        if (
+            not configured_agents
+            or not all(_identity(agent) for agent in configured_agents)
+            or not isinstance(routes, Mapping)
+            or not routes
+        ):
+            raise QueueRefused()
+        configured_routes: dict[tuple[str, str], frozenset[str]] = {}
+        for edge, modes in routes.items():
+            try:
+                source, destination = edge
+                allowed_modes = frozenset(modes)
+            except (TypeError, ValueError) as exc:
+                raise QueueRefused() from exc
+            if (
+                not isinstance(edge, tuple)
+                or len(edge) != 2
+                or source not in configured_agents
+                or destination not in configured_agents
+                or not allowed_modes
+                or not allowed_modes <= _ROUTE_MODES
+            ):
+                raise QueueRefused()
+            configured_routes[(source, destination)] = allowed_modes
+        self.agents = configured_agents
+        self.routes = MappingProxyType(configured_routes)
+        self._frozen = True
+
+    def allows(self, source: str, destination: str, mode: str) -> bool:
+        return mode in self.routes.get((source, destination), ())
+
+    def destinations(self, source: str, mode: str) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                destination
+                for (route_source, destination), modes in self.routes.items()
+                if route_source == source and mode in modes
+            )
+        )
+
+    def as_record(self) -> dict:
+        return {
+            "agents": sorted(self.agents),
+            "routes": [
+                {"source": source, "destination": destination, "modes": sorted(modes)}
+                for (source, destination), modes in sorted(self.routes.items())
+            ],
+        }
+
+
 class DurableQueue:
     """A filesystem-backed queue. Every state transition is serialized by one lock."""
 
-    def __init__(self, root: Path, *, producer_id: str = "producer", worker_id: str = "worker") -> None:
-        if not _identity(producer_id) or not _identity(worker_id):
-            raise QueueRefused()
+    def __init__(
+        self,
+        root: Path,
+        *,
+        policy: RoutePolicy | None = None,
+        agent_id: str | None = None,
+        producer_id: str | None = None,
+        worker_id: str | None = None,
+    ) -> None:
+        self._legacy_pair = policy is None
+        if policy is None:
+            if agent_id is not None or producer_id is None or worker_id is None:
+                raise QueueRefused()
+            producer = producer_id
+            worker = worker_id
+            if not _identity(producer) or not _identity(worker):
+                raise QueueRefused()
+            policy = RoutePolicy(
+                agents=(producer, worker),
+                routes={(producer, worker): _ROUTE_MODES},
+            )
+            self._source_id, self._worker_id = producer, worker
+        else:
+            if (
+                not isinstance(policy, RoutePolicy)
+                or not _identity(agent_id)
+                or agent_id not in policy.agents
+                or producer_id is not None
+                or worker_id is not None
+            ):
+                raise QueueRefused()
+            self._source_id = self._worker_id = agent_id
         self.root = Path(root)
-        self.producer_id, self.worker_id = producer_id, worker_id
+        self.policy = policy
+        self.agent_id = agent_id
+        self.producer_id, self.worker_id = self._source_id, self._worker_id
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.root, 0o700)
         (self.root / "tasks").mkdir(exist_ok=True, mode=0o700)
@@ -108,6 +214,13 @@ class DurableQueue:
         (self.root / "consultations").mkdir(exist_ok=True, mode=0o700)
         (self.root / "consultation_idempotency").mkdir(exist_ok=True, mode=0o700)
         self._lock_path = self.root / ".queue.lock"
+        with self._locked():
+            policy_path = self.root / "policy.json"
+            if policy_path.exists():
+                if self._read(policy_path) != self.policy.as_record():
+                    raise QueueRefused()
+            else:
+                self._write(policy_path, self.policy.as_record())
 
     @contextmanager
     def _locked(self) -> Iterator[None]:
@@ -120,6 +233,22 @@ class DurableQueue:
 
     def _path(self, task_id: str) -> Path:
         return self.root / "tasks" / f"{task_id}.json"
+
+    def _destination(self, destination_id: str | None, mode: str) -> str:
+        destinations = self.policy.destinations(self._source_id, mode)
+        destination = destinations[0] if destination_id is None and len(destinations) == 1 else destination_id
+        if (
+            not isinstance(destination, str)
+            or not _identity(destination)
+            or not self.policy.allows(self._source_id, destination, mode)
+        ):
+            raise QueueRefused()
+        return destination
+
+    def _idempotency_path(self, directory: str, destination: str, key: str) -> Path:
+        namespace = self.root / directory / self._source_id / destination
+        namespace.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return namespace / key
 
     def _consultation_path(self, consultation_id: str) -> Path:
         return self.root / "consultations" / f"{consultation_id}.json"
@@ -144,22 +273,32 @@ class DurableQueue:
         except (OSError, ValueError, TypeError) as exc:
             raise QueueRefused() from exc
 
-    def enqueue(self, *, goal: str, references: list[str], idempotency_key: str, producer_id: str | None = None) -> str:
-        producer = self.producer_id if producer_id is None else producer_id
+    def enqueue(
+        self,
+        *,
+        goal: str,
+        references: list[str],
+        idempotency_key: str,
+        destination_id: str | None = None,
+    ) -> str:
+        producer = self._source_id
+        destination = self._destination(destination_id, "task")
         if (not _safe_text(goal, MAX_GOAL_BYTES) or
                 not isinstance(references, list) or len(references) > MAX_REFERENCES or
                 not all(isinstance(item, str) and _public_https(item) for item in references) or
-                not isinstance(idempotency_key, str) or idempotency_key in (".", "..") or not idempotency_key or len(idempotency_key) > 160 or
-                producer != self.producer_id):
+                not isinstance(idempotency_key, str) or idempotency_key in (".", "..") or not idempotency_key or len(idempotency_key) > 160):
             raise QueueRefused()
         with self._locked():
             if not all(char.isalnum() or char in "._-" for char in idempotency_key):
                 raise QueueRefused()
-            key_path = self.root / "idempotency" / idempotency_key
+            key_path = self._idempotency_path("idempotency", destination, idempotency_key)
+            legacy_key_path = self.root / "idempotency" / idempotency_key
+            if self._legacy_pair and legacy_key_path.exists():
+                return str(self._read(legacy_key_path)["task_id"])
             if key_path.exists():
                 return str(self._read(key_path)["task_id"])
             task_id = f"{_TASK_PREFIX}{secrets.token_hex(16)}"
-            task = {"task_id": task_id, "producer_id": producer, "worker_id": self.worker_id, "goal": goal, "references": references, "status": "pending", "lease_id": None, "lease_expires_at": None, "result": None}
+            task = {"task_id": task_id, "producer_id": producer, "worker_id": destination, "goal": goal, "references": references, "status": "pending", "lease_id": None, "lease_expires_at": None, "result": None}
             self._write(self._path(task_id), task)
             self._write(key_path, {"task_id": task_id})
             return task_id
@@ -171,14 +310,14 @@ class DurableQueue:
         origin_ref: str,
         idempotency_key: str,
         expires_in_seconds: int,
+        destination_id: str | None = None,
         now: datetime | None = None,
-        producer_id: str | None = None,
     ) -> dict:
         """Create an advice-only consultation from the configured local producer."""
-        producer = self.producer_id if producer_id is None else producer_id
+        producer = self._source_id
+        destination = self._destination(destination_id, "consultation")
         if (
-            producer != self.producer_id
-            or not _safe_text(question, MAX_QUESTION_BYTES)
+            not _safe_text(question, MAX_QUESTION_BYTES)
             or not _safe_text(origin_ref, MAX_ORIGIN_REF_BYTES)
             or not isinstance(idempotency_key, str)
             or idempotency_key in ("", ".", "..")
@@ -191,7 +330,13 @@ class DurableQueue:
             raise QueueRefused()
         instant = _instant(now)
         with self._locked():
-            key_path = self.root / "consultation_idempotency" / idempotency_key
+            key_path = self._idempotency_path(
+                "consultation_idempotency", destination, idempotency_key
+            )
+            legacy_key_path = self.root / "consultation_idempotency" / idempotency_key
+            if self._legacy_pair and legacy_key_path.exists():
+                existing_id = self._read(legacy_key_path)["consultation_id"]
+                return self._read(self._consultation_path(existing_id))
             if key_path.exists():
                 existing_id = self._read(key_path)["consultation_id"]
                 return self._read(self._consultation_path(existing_id))
@@ -199,7 +344,7 @@ class DurableQueue:
             record = {
                 "consultation_id": consultation_id,
                 "producer_id": producer,
-                "worker_id": self.worker_id,
+                "worker_id": destination,
                 "origin_ref": origin_ref,
                 "idempotency_key": idempotency_key,
                 "question": question,
@@ -220,14 +365,12 @@ class DurableQueue:
         self,
         consultation_id: str,
         *,
-        producer_id: str | None = None,
         now: datetime | None = None,
     ) -> dict:
         """Read consultation state through the configured local producer route."""
-        producer = self.producer_id if producer_id is None else producer_id
+        producer = self._source_id
         if (
-            producer != self.producer_id
-            or not isinstance(consultation_id, str)
+            not isinstance(consultation_id, str)
             or not _identifier(consultation_id, _CONSULTATION_PREFIX)
         ):
             raise QueueRefused()
@@ -250,16 +393,14 @@ class DurableQueue:
     def claim_question(
         self,
         now: datetime | None = None,
-        *,
-        worker_id: str | None = None,
     ) -> dict | None:
         """Claim one pending or expired-lease consultation for the configured worker."""
-        worker = self.worker_id if worker_id is None else worker_id
-        if worker != self.worker_id:
-            raise QueueRefused()
+        worker = self._worker_id
         instant = _instant(now)
         with self._locked():
             for record in self._consultations():
+                if record.get("worker_id") != worker:
+                    continue
                 expires_at = _parse_stamp(record.get("expires_at"))
                 if record.get("status") in ("pending", "leased") and expires_at <= instant:
                     record["status"] = "expired"
@@ -298,13 +439,11 @@ class DurableQueue:
         lease_id: str,
         answer: str,
         now: datetime | None = None,
-        worker_id: str | None = None,
     ) -> str:
         """Store a bounded answer for a claimed consultation."""
-        worker = self.worker_id if worker_id is None else worker_id
+        worker = self._worker_id
         if (
-            worker != self.worker_id
-            or not isinstance(consultation_id, str)
+            not isinstance(consultation_id, str)
             or not _identifier(consultation_id, _CONSULTATION_PREFIX)
             or not isinstance(lease_id, str)
             or not _identifier(lease_id, _LEASE_PREFIX)
@@ -335,13 +474,13 @@ class DurableQueue:
     def _tasks(self) -> list[dict]:
         return [self._read(path) for path in sorted((self.root / "tasks").glob("task_*.json"))]
 
-    def claim(self, now: datetime | None = None, *, worker_id: str | None = None) -> dict | None:
-        worker = self.worker_id if worker_id is None else worker_id
-        if worker != self.worker_id:
-            raise QueueRefused()
+    def claim(self, now: datetime | None = None) -> dict | None:
+        worker = self._worker_id
         instant = now or _now()
         with self._locked():
             for task in self._tasks():
+                if task.get("worker_id") != worker:
+                    continue
                 expired = task["status"] == "leased" and datetime.fromisoformat(task["lease_expires_at"].replace("Z", "+00:00")) <= instant
                 if task["status"] not in ("pending",) and not expired:
                     continue
@@ -352,27 +491,37 @@ class DurableQueue:
                 return {key: task[key] for key in ("task_id", "goal", "references", "lease_id", "lease_expires_at")}
         return None
 
-    def finish(self, *, task_id: str, lease_id: str, result: str | None, failed: bool, now: datetime | None = None, worker_id: str | None = None) -> str:
-        worker = self.worker_id if worker_id is None else worker_id
+    def finish(self, *, task_id: str, lease_id: str, result: str | None, failed: bool, now: datetime | None = None) -> str:
+        worker = self._worker_id
         if (not isinstance(task_id, str) or not isinstance(lease_id, str) or
-                not _identifier(task_id, _TASK_PREFIX) or not _identifier(lease_id, _LEASE_PREFIX) or worker != self.worker_id):
+                not _identifier(task_id, _TASK_PREFIX) or not _identifier(lease_id, _LEASE_PREFIX)):
             raise QueueRefused()
         if not failed and not _safe_text(result, MAX_RESULT_BYTES):
             raise QueueRefused()
         with self._locked():
             task = self._read(self._path(task_id))
+            if task.get("worker_id") != worker:
+                raise QueueRefused()
             if task["status"] in ("completed", "failed"):
                 if task["lease_id"] == lease_id:
                     return f"already_{task['status']}"
                 raise QueueRefused()
             instant = now or _now()
-            if task["worker_id"] != worker or task["status"] != "leased" or task["lease_id"] != lease_id or datetime.fromisoformat(task["lease_expires_at"].replace("Z", "+00:00")) <= instant:
+            if task["status"] != "leased" or task["lease_id"] != lease_id or datetime.fromisoformat(task["lease_expires_at"].replace("Z", "+00:00")) <= instant:
                 raise QueueRefused()
             task["status"] = "failed" if failed else "completed"
             task["result"] = None if failed else result
             self._write(self._path(task_id), task)
             return task["status"]
 
-    def inspect(self, task_id: str) -> dict:
+    def read_task(self, task_id: str) -> dict:
+        if not isinstance(task_id, str) or not _identifier(task_id, _TASK_PREFIX):
+            raise QueueRefused()
         with self._locked():
-            return self._read(self._path(task_id))
+            task = self._read(self._path(task_id))
+            if task.get("producer_id") != self._source_id:
+                raise QueueRefused()
+            return task
+
+    def inspect(self, task_id: str) -> dict:
+        return self.read_task(task_id)

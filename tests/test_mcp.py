@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 from pathlib import Path
 
@@ -25,7 +26,7 @@ def _request(app: MCPApplication, headers: list[tuple[bytes, bytes]], body: byte
 
 
 def test_only_the_closed_task_and_consultation_tools_are_discoverable(tmp_path: Path) -> None:
-    app = MCPApplication(DurableQueue(tmp_path), "synthetic-secret")
+    app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
     response = app._dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
     assert [tool["name"] for tool in response["result"]["tools"]] == [tool["name"] for tool in TOOLS]
     assert [tool["name"] for tool in TOOLS] == [
@@ -76,7 +77,7 @@ def test_consultation_schemas_are_closed_and_advice_only() -> None:
 
 
 def test_mcp_authentication_and_task_lifecycle(tmp_path: Path) -> None:
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     task_id = queue.enqueue(goal="read", references=[], idempotency_key="mcp")
     app = MCPApplication(queue, "synthetic-secret")
     payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "claim_task", "arguments": {}}}).encode()
@@ -90,7 +91,7 @@ def test_mcp_authentication_and_task_lifecycle(tmp_path: Path) -> None:
 
 
 def test_mcp_refuses_unknown_or_malformed_tools(tmp_path: Path) -> None:
-    app = MCPApplication(DurableQueue(tmp_path), "synthetic-secret")
+    app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
     for params in (
         {"name": "enqueue", "arguments": {}},
         {"name": "claim_task", "arguments": {"extra": True}},
@@ -102,18 +103,25 @@ def test_mcp_refuses_unknown_or_malformed_tools(tmp_path: Path) -> None:
         assert response["error"]["message"] == "request refused"
 
 
-def test_mcp_cannot_override_configured_worker(tmp_path: Path) -> None:
+def test_mcp_uses_only_the_queue_bound_principal(tmp_path: Path) -> None:
     queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
-    try:
-        MCPApplication(queue, "synthetic-secret", worker_id="other")
-    except ValueError as exc:
-        assert "configured" in str(exc)
-    else:
-        raise AssertionError("unconfigured worker was accepted")
+    assert "worker_id" not in inspect.signature(MCPApplication).parameters
+    spoofable_identity_fields = {
+        "agent_id",
+        "source_id",
+        "producer_id",
+        "worker_id",
+        "destination_id",
+    }
+    for tool in TOOLS:
+        assert spoofable_identity_fields.isdisjoint(
+            tool["inputSchema"].get("properties", {})
+        )
+    assert MCPApplication(queue, "synthetic-secret").queue is queue
 
 
 def test_mcp_boundary_refusals_are_sanitized_and_bounded(tmp_path: Path) -> None:
-    app = MCPApplication(DurableQueue(tmp_path), "synthetic-secret")
+    app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
     authorized = [(b"authorization", b"Bearer synthetic-secret")]
     for body in (b"[]", b"null", b"5", b"\"x\"", b"{not json"):
         response = _request(app, authorized, body)
@@ -126,7 +134,7 @@ def test_mcp_boundary_refusals_are_sanitized_and_bounded(tmp_path: Path) -> None
 
 
 def test_mcp_authenticates_before_wrong_method_or_path_body_read(tmp_path: Path) -> None:
-    app = MCPApplication(DurableQueue(tmp_path), "synthetic-secret")
+    app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
     headers = [(b"authorization", b"Bearer synthetic-secret")]
     for method, path in (("GET", "/mcp"), ("POST", "/wrong")):
         response = _request(app, headers, b"x" * (16 * 1024 + 1), method=method, path=path)
@@ -136,7 +144,7 @@ def test_mcp_authenticates_before_wrong_method_or_path_body_read(tmp_path: Path)
 
 
 def test_mcp_ping_notifications_and_batches(tmp_path: Path) -> None:
-    app = MCPApplication(DurableQueue(tmp_path), "synthetic-secret")
+    app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
     headers = [(b"authorization", b"Bearer synthetic-secret")]
     ping = _request(app, headers, b'{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}')
     assert json.loads(ping[1]["body"]) == {"jsonrpc": "2.0", "id": 1, "result": {}}
@@ -148,7 +156,7 @@ def test_mcp_ping_notifications_and_batches(tmp_path: Path) -> None:
 
 
 def test_mcp_corrupt_task_record_is_sanitized(tmp_path: Path) -> None:
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     task_id = queue.enqueue(goal="read", references=[], idempotency_key="corrupt")
     task_path = tmp_path / "tasks" / f"{task_id}.json"
     task = json.loads(task_path.read_text())

@@ -6,7 +6,7 @@ import threading
 import pytest
 
 from agent_bus_mcp.mcp import MCPApplication
-from agent_bus_mcp.queue import DurableQueue, QueueRefused
+from agent_bus_mcp.queue import DurableQueue, QueueRefused, RoutePolicy
 
 
 def _ask(queue: DurableQueue, now: datetime, key: str = "question") -> dict:
@@ -16,7 +16,6 @@ def _ask(queue: DurableQueue, now: datetime, key: str = "question") -> dict:
         idempotency_key=key,
         expires_in_seconds=3600,
         now=now,
-        producer_id=queue.producer_id,
     )
 
 
@@ -30,7 +29,6 @@ def test_local_ask_is_durable_idempotent_and_separate_from_tasks(tmp_path: Path)
         idempotency_key="question-once",
         expires_in_seconds=3600,
         now=now,
-        producer_id="requester",
     )
     duplicate = queue.ask_question(
         question="A retry must not replace the original question",
@@ -38,7 +36,6 @@ def test_local_ask_is_durable_idempotent_and_separate_from_tasks(tmp_path: Path)
         idempotency_key="question-once",
         expires_in_seconds=60,
         now=now,
-        producer_id="requester",
     )
 
     assert duplicate == first
@@ -58,7 +55,7 @@ def test_local_ask_is_durable_idempotent_and_separate_from_tasks(tmp_path: Path)
         "answer": None,
         "answered_at": None,
     }
-    assert queue.read_answer(first["consultation_id"], producer_id="requester", now=now) == first
+    assert queue.read_answer(first["consultation_id"], now=now) == first
     assert queue.claim(now) is None
     assert not list((tmp_path / "tasks").glob("*.json"))
 
@@ -70,9 +67,8 @@ def test_ask_mcp_claim_mcp_answer_local_read(tmp_path: Path) -> None:
         origin_ref="draft-4",
         idempotency_key="e2e-question",
         expires_in_seconds=3600,
-        producer_id="requester",
     )
-    app = MCPApplication(queue, "synthetic-secret", worker_id="advisor")
+    app = MCPApplication(queue, "synthetic-secret")
 
     claimed_response = app._dispatch(
         {
@@ -106,7 +102,7 @@ def test_ask_mcp_claim_mcp_answer_local_read(tmp_path: Path) -> None:
     answered = answered_response["result"]["structuredContent"]
     assert answered == {"status": "answered", "consultation_id": asked["consultation_id"]}
 
-    final = queue.read_answer(asked["consultation_id"], producer_id="requester")
+    final = queue.read_answer(asked["consultation_id"])
     assert final["status"] == "answered"
     assert final["answer"] == "Yes; it makes the section easier to scan."
     assert final["answered_at"]
@@ -128,7 +124,7 @@ def test_ask_mcp_claim_mcp_answer_local_read(tmp_path: Path) -> None:
     ],
 )
 def test_ask_refuses_malformed_or_oversize_values(tmp_path: Path, field: str, value: object) -> None:
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     arguments: dict[str, object] = {
         "question": "Is this bounded?",
         "origin_ref": "draft-2",
@@ -141,7 +137,7 @@ def test_ask_refuses_malformed_or_oversize_values(tmp_path: Path, field: str, va
 
 
 def test_ask_refuses_malformed_time(tmp_path: Path) -> None:
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     with pytest.raises(QueueRefused, match="^request refused$"):
         queue.ask_question(
             question="Is this bounded?",
@@ -154,7 +150,7 @@ def test_ask_refuses_malformed_time(tmp_path: Path) -> None:
 
 def test_expired_question_cannot_be_claimed_or_answered(tmp_path: Path) -> None:
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     asked = queue.ask_question(
         question="Will this expire?",
         origin_ref="draft-3",
@@ -170,7 +166,7 @@ def test_expired_question_cannot_be_claimed_or_answered(tmp_path: Path) -> None:
 
 def test_expired_lease_rotates_fence_without_extending_question(tmp_path: Path) -> None:
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     asked = _ask(queue, base)
     first = queue.claim_question(base)
     second = queue.claim_question(base + timedelta(seconds=901))
@@ -188,38 +184,33 @@ def test_expired_lease_rotates_fence_without_extending_question(tmp_path: Path) 
 
 def test_configured_identities_and_lease_are_authoritative(tmp_path: Path) -> None:
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    queue = DurableQueue(tmp_path, producer_id="requester", worker_id="advisor")
+    policy = RoutePolicy(
+        agents={"requester", "advisor", "other"},
+        routes={("requester", "advisor"): {"consultation"}},
+    )
+    requester = DurableQueue(tmp_path, policy=policy, agent_id="requester")
+    advisor = DurableQueue(tmp_path, policy=policy, agent_id="advisor")
+    other = DurableQueue(tmp_path, policy=policy, agent_id="other")
+    asked = _ask(requester, base)
     with pytest.raises(QueueRefused):
-        queue.ask_question(
-            question="No",
-            origin_ref="origin",
-            idempotency_key="wrong-producer",
-            expires_in_seconds=60,
-            now=base,
-            producer_id="other",
-        )
-    asked = _ask(queue, base)
-    with pytest.raises(QueueRefused):
-        queue.read_answer(asked["consultation_id"], producer_id="other", now=base)
-    with pytest.raises(QueueRefused):
-        queue.claim_question(base, worker_id="other")
-    claimed = queue.claim_question(base, worker_id="advisor")
+        other.read_answer(asked["consultation_id"], now=base)
+    assert other.claim_question(base) is None
+    claimed = advisor.claim_question(base)
     assert claimed
-    for worker, lease in (("other", claimed["lease_id"]), ("advisor", "lease_" + "0" * 32)):
+    for queue, lease in ((other, claimed["lease_id"]), (advisor, "lease_" + "0" * 32)):
         with pytest.raises(QueueRefused):
             queue.answer_question(
                 consultation_id=asked["consultation_id"],
                 lease_id=lease,
                 answer="No",
                 now=base,
-                worker_id=worker,
             )
 
 
 @pytest.mark.parametrize("answer", ["é" * 1025, "unsafe\x00answer", ""])
 def test_answer_refuses_malformed_or_oversize_text(tmp_path: Path, answer: str) -> None:
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     asked = _ask(queue, base)
     claimed = queue.claim_question(base)
     assert claimed
@@ -248,7 +239,6 @@ def test_competing_answers_allow_exactly_one_and_preserve_binding(tmp_path: Path
                     lease_id=claimed["lease_id"],
                     answer=answer,
                     now=base + timedelta(seconds=1),
-                    worker_id="advisor",
                 )
             )
         except QueueRefused:
@@ -259,7 +249,7 @@ def test_competing_answers_allow_exactly_one_and_preserve_binding(tmp_path: Path
     [worker.join() for worker in workers]
     assert sorted(outcomes) == ["answered", "refused"]
 
-    final = queue.read_answer(asked["consultation_id"], producer_id="requester", now=base)
+    final = queue.read_answer(asked["consultation_id"], now=base)
     for field in ("consultation_id", "producer_id", "worker_id", "origin_ref", "idempotency_key", "question", "created_at", "expires_at"):
         assert final[field] == asked[field]
     with pytest.raises(QueueRefused):

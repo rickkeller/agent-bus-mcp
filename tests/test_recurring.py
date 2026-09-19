@@ -6,7 +6,7 @@ from agent_bus_mcp.recurring import bucket_for, enqueue_due
 
 
 def test_buckets_and_recurring_idempotency(tmp_path: Path) -> None:
-    queue = DurableQueue(tmp_path)
+    queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
     now = datetime(2026, 9, 13, 15, tzinfo=timezone.utc)
     first = enqueue_due(queue, "weekly", now)
     assert first == enqueue_due(queue, "weekly", now)

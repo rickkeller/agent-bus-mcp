@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-bus-mcp"
 version = "0.1.0"
-description = "A small bridge for agents to ask quick questions or hand off bounded tasks"
+description = "A local durable bus for policy-controlled agent questions and bounded tasks"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}

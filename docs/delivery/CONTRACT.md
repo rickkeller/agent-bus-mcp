@@ -1,18 +1,29 @@
 # Delivery Contract
 
-Version: 2
+Version: 3
 Owner: repository maintainer
 
 ## Outcome
-Add a separate, advice-only consultation lane so the configured local producer can ask a bounded question, the configured MCP worker can claim and answer it once, and the producer can read the answer without changing the formal task queue.
+Evolve the public local Agent Bus core from one configured producer/worker pair into a policy-controlled directed graph. One state root must support at least three configured agents, one-to-many formal-task assignment, many-to-many authorized routes, and strict cross-route isolation while preserving explicit task-versus-consultation authority.
 
 ## Boundaries
-- Allowed: repository source, tests, README, package metadata, this delivery record, pushing the verified commits to the existing public `origin/main`, and updating only the GitHub repository description under the owner's explicit authorization.
-- Forbidden: package installation, service/deployment changes, credentials, history rewriting, visibility changes, private environment details, and unrelated refactors.
-- Non-goals: multi-worker routing, remote question creation, attachments, commands, execution authority, or automatic task creation/completion.
+- Allowed: repository source, tests, README, SECURITY.md, package metadata, and `docs/delivery/*`; local test/static commands; one local commit for parent review.
+- Forbidden: pushing or publishing, service/deployment changes, credentials, live/private profiles or state, private identities or paths, network federation, consensus, replicated storage, service discovery, live multi-host transport, and unrelated refactors or scaffolding.
+- Compatibility boundary: existing two-agent deployments remain expressible as a one-edge graph. Retain an unambiguous safe constructor path where possible, document any call-site migration, and never keep singleton producer/worker fields as the internal authority model.
 
 ## Acceptance
-Existing task behavior remains green; consultation happy path, MCP end-to-end path, idempotency, authority, lease, expiry, size, competing-answer, and task-separation cases pass; README begins in plain language; static and delivery checks pass; tracked content and complete Git history scans report no unallowlisted forbidden or credential-shaped content; the verified commits and plain-language description are read back from the public repository.
+1. A route policy configures at least three distinct agents and a closed directional edge allowlist.
+2. One bound controller can assign formal tasks to at least two workers on one state root.
+3. At least two bound producers can address allowed workers; a missing edge is refused without exposing queue contents.
+4. Source identity comes only from a bound local API object/principal, never from enqueue/consultation payload fields.
+5. Workers claim, read, and finish only records addressed to their bound identity; cross-worker attempts are refused or return no record without content leakage.
+6. Idempotency is namespaced by mode, source, and destination: producers may reuse a key, while replay on one route returns the original record.
+7. Task return binding and consultation origin binding remain fixed through terminal transitions; no arbitrary delivery authority is added.
+8. A two-agent one-edge graph and the legacy constructor remain covered, with redundant caller identity overrides removed and migration documented.
+9. Route edges carry explicit `task` and/or `consultation` modes so advice authority remains separate from formal task authority.
+10. The README opening states many-agent, one-to-many, policy-controlled many-to-many behavior and explains that controllers coordinate without monopolizing transport.
+11. Negative tests cover spoofed source fields, forbidden routes, wrong workers, stale leases, duplicate terminal transitions, unsafe IDs, and cross-route isolation.
+12. Focused RED/GREEN evidence, the full suite, py_compile, diff check, delivery and phase validators through VERIFY_EXIT, and a public-repository private-identifier/secret scan pass before one local commit. RELEASE_EXIT and ACCEPT_EXIT remain pending for the parent.
 
 ## Evidence and stop condition
-Use repository-local tests and static checks before release, then push only to the existing public `origin/main`, update only the repository description, and read both back. Rollback is a normal public revert plus restoration of the prior description; never rewrite public history. No operator action is required.
+Use temporary local state roots and the repository Python environment only. Stop after the immutable implementation tree and final local commit pass the mapped checks, the worktree is clean, no private/live path changed, and no push occurred. Rollback is removal or normal revert of the single local commit; no external state is changed and no operator action is required.

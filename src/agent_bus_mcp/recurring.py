@@ -34,7 +34,7 @@ def manifest() -> list[dict[str, str]]:
     return value
 
 
-def enqueue_due(queue: DurableQueue, cadence: str, now: datetime, *, producer_id: str | None = None) -> tuple[str, ...]:
+def enqueue_due(queue: DurableQueue, cadence: str, now: datetime) -> tuple[str, ...]:
     bucket = bucket_for(cadence, now)
     tickets: list[str] = []
     for item in manifest():
@@ -43,7 +43,7 @@ def enqueue_due(queue: DurableQueue, cadence: str, now: datetime, *, producer_id
         if item["cadence"] != cadence:
             continue
         goal = f"PUBLIC_RESEARCH_V1\ntopic: {item['topic']}\nscope: {item['focus']}\nUse only public sources. Return source, date, relevance, confidence, limits, and a concise NO_ACTION result when appropriate. Do not run tools, change systems, access local data, or perform outreach."
-        tickets.append(queue.enqueue(goal=goal, references=[item["reference"]], idempotency_key=f"public-research-v1-{item['topic']}-{bucket}", producer_id=producer_id))
+        tickets.append(queue.enqueue(goal=goal, references=[item["reference"]], idempotency_key=f"public-research-v1-{item['topic']}-{bucket}"))
     return tuple(tickets)
 
 
@@ -55,5 +55,5 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--worker-id", required=True)
     args = parser.parse_args(argv)
     queue = DurableQueue(Path(args.state_dir), producer_id=args.producer_id, worker_id=args.worker_id)
-    print(json.dumps({"tasks": enqueue_due(queue, args.cadence, datetime.now(timezone.utc), producer_id=args.producer_id)}, separators=(",", ":")))
+    print(json.dumps({"tasks": enqueue_due(queue, args.cadence, datetime.now(timezone.utc))}, separators=(",", ":")))
     return 0

@@ -38,9 +38,9 @@ Verdict: REVIEWED
 
 ## Phase Exits
 Historical-rejected-evidence: Commit `05fc178d4644b5c7c85c9a06d16bf8e98a1fa743`, tree `244c89f13515af9ec6afafc371ea53457c278d87`, and pre-commit implementation tree `7c68e0fa5d942530826796ea4e54b65396fa85fd` remain historical only. Independent review rejected 05fc178 for Unicode-confusable identities, policy-bypassing parent-format migration, and an unsupported `100278`-byte evidence claim. Its actual final-tree basis is 24 Git blobs / 101776 summed blob bytes; its pre-commit implementation-tree basis is 24 Git blobs / 99619 summed blob bytes.
-Implementation-evidence: PENDING for the new focused repair commit and immutable tree.
-Verification-evidence: PENDING for checks against the new focused repair artifact.
-IMPLEMENT_EXIT: PENDING
-VERIFY_EXIT: PENDING
+Implementation-evidence: Implementation artifact commit `4e161821643cecb666895f6b8cca78925a8b5fd3`, tree `dfcb1061fa72302bc62cc50c806da5f189ccf317`, 24 Git blobs / 121111 summed blob bytes. Its exact four-path delta is `docs/delivery/LOG.md`, `docs/delivery/STATUS.md`, `src/agent_bus_mcp/queue.py`, and `tests/test_routing.py`; route-edge exact-type and parent-record fail-closed repairs remain within G2.
+Verification-evidence: Exact implementation commit 4e16182 replay passed: focused repaired behavior 24 tests; routing suite 35 tests; full suite 71 tests; py_compile and commit/worktree diff checks exit 0; delivery validator `PASS: delivery record valid (Working, P9)`; four-path scope check passed; deterministic 24-file / 121111-byte tracked-blob private-path/private-key/provider-token/bearer-value/credential-assignment scan found 0; immutable replay matched commit and tree with a clean worktree.
+IMPLEMENT_EXIT: REVIEWED
+VERIFY_EXIT: REVIEWED
 RELEASE_EXIT: PENDING
 ACCEPT_EXIT: PENDING

@@ -15,7 +15,7 @@ A quick question has no structured fields for file or web references, payloads, 
 
 ## How the boundary works
 
-Agent Bus MCP is a small, vendor-neutral, MIT-licensed Python package. `RoutePolicy` declares configured agents and a closed set of directional edges; every edge separately allows formal tasks, advice-only consultations, or both. Each `DurableQueue` API object is bound to one configured principal, so callers cannot supply a source or worker identity in enqueue, claim, read, answer, or finish calls. The exact graph is persisted with the private state root.
+Agent Bus MCP is a small, vendor-neutral, MIT-licensed Python package. `RoutePolicy` declares configured agents and a closed set of directional edges; every edge separately allows formal tasks, advice-only consultations, or both. Principal identities are exact built-in strings of 1–64 ASCII letters, digits, `_`, or `-`; non-ASCII identities are refused rather than normalized. Each `DurableQueue` API object is bound to one configured principal, so callers cannot supply a source or worker identity in enqueue, claim, read, answer, or finish calls. The exact graph is persisted with the private state root.
 
 Task and consultation records use separate directories. Idempotency is namespaced by mode, source, and destination. A single process lock, atomic JSON replacement, file and directory `fsync`, expiring leases, and lease fencing make state transitions durable and predictable.
 
@@ -66,6 +66,8 @@ queue = DurableQueue(
     worker_id="example_worker",
 )
 ```
+
+When a parent-format state root has records but no `policy.json`, the first graph-bound open admits it only if every stored task edge allows `task` and every stored consultation edge allows `consultation`. Any absent edge or mode refuses the whole open before policy creation or record mutation.
 
 `claim_question` returns `status=empty` or a claimed question with its `consultation_id`, `origin_ref`, `question`, consultation expiry, lease ID, and lease expiry. A lease lasts at most 900 seconds and never extends beyond the question expiry. An expired lease may be reclaimed with a new fence while the question remains live. `answer_question` requires the exact live lease and one bounded answer. Wrong identities or leases, expired questions or leases, and every second answer are refused without revealing details.
 

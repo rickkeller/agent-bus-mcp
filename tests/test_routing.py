@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,108 @@ def _policy(agents: set[str], routes: dict[tuple[str, str], set[str]]):
     policy_type = getattr(agent_bus_mcp, "RoutePolicy", None)
     assert policy_type is not None, "RoutePolicy must be public"
     return policy_type(agents=agents, routes=routes)
+
+
+def _write_parent_record(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, separators=(",", ":"), ensure_ascii=True),
+        encoding="utf-8",
+    )
+
+
+def _create_parent_format_state(
+    root: Path, *, include_task: bool = True, include_consultation: bool = True
+) -> tuple[str | None, str | None]:
+    for directory in ("tasks", "idempotency", "consultations", "consultation_idempotency"):
+        (root / directory).mkdir(parents=True, exist_ok=True)
+    (root / ".queue.lock").write_text("", encoding="utf-8")
+
+    task_id = "task_" + "1" * 32 if include_task else None
+    if task_id:
+        _write_parent_record(
+            root / "tasks" / f"{task_id}.json",
+            {
+                "task_id": task_id,
+                "producer_id": "producer",
+                "worker_id": "worker",
+                "goal": "legacy task",
+                "references": [],
+                "status": "pending",
+                "lease_id": None,
+                "lease_expires_at": None,
+                "result": None,
+            },
+        )
+        _write_parent_record(root / "idempotency" / "task-once", {"task_id": task_id})
+
+    consultation_id = "consultation_" + "2" * 32 if include_consultation else None
+    if consultation_id:
+        _write_parent_record(
+            root / "consultations" / f"{consultation_id}.json",
+            {
+                "consultation_id": consultation_id,
+                "producer_id": "producer",
+                "worker_id": "worker",
+                "origin_ref": "legacy-origin",
+                "idempotency_key": "question-once",
+                "question": "Legacy question?",
+                "status": "pending",
+                "created_at": "2026-01-01T00:00:00Z",
+                "expires_at": "2026-01-01T01:00:00Z",
+                "lease_id": None,
+                "lease_expires_at": None,
+                "claimed_at": None,
+                "answer": None,
+                "answered_at": None,
+            },
+        )
+        _write_parent_record(
+            root / "consultation_idempotency" / "question-once",
+            {"consultation_id": consultation_id},
+        )
+    return task_id, consultation_id
+
+
+def _parent_record_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for directory in ("tasks", "idempotency", "consultations", "consultation_idempotency")
+        for path in sorted((root / directory).rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_authority_identities_use_ascii_grammar() -> None:
+    valid = _policy(
+        {"producer", "worker_1"},
+        {("producer", "worker_1"): {"task"}},
+    )
+    assert valid.allows("producer", "worker_1", "task")
+
+    confusable_worker = "w\u043erker"
+    with pytest.raises(QueueRefused, match="^request refused$"):
+        _policy(
+            {"producer", confusable_worker},
+            {("producer", confusable_worker): {"task"}},
+        )
+
+
+def test_constructor_identities_refuse_non_ascii_before_state_creation(tmp_path: Path) -> None:
+    confusable_worker = "w\u043erker"
+    legacy_root = tmp_path / "legacy"
+    with pytest.raises(QueueRefused, match="^request refused$"):
+        DurableQueue(legacy_root, producer_id="producer", worker_id=confusable_worker)
+    assert not legacy_root.exists()
+
+    policy = _policy(
+        {"producer", "worker_1"},
+        {("producer", "worker_1"): {"task"}},
+    )
+    bound_root = tmp_path / "bound"
+    with pytest.raises(QueueRefused, match="^request refused$"):
+        DurableQueue(bound_root, policy=policy, agent_id=confusable_worker)
+    assert not bound_root.exists()
 
 
 def test_route_policy_cannot_be_reassigned_after_construction() -> None:
@@ -235,3 +338,71 @@ def test_graph_is_primary_and_explicit_two_agent_pair_is_compatible(tmp_path: Pa
     task_id = queue.enqueue(goal="legacy", references=[], idempotency_key="one-edge")
     claimed = queue.claim()
     assert claimed and claimed["task_id"] == task_id
+
+
+def test_matching_policy_admits_parent_format_records_and_preserves_lifecycle(tmp_path: Path) -> None:
+    root = tmp_path / "parent"
+    task_id, consultation_id = _create_parent_format_state(root)
+    assert task_id and consultation_id
+    policy = _policy(
+        {"producer", "worker"},
+        {("producer", "worker"): {"task", "consultation"}},
+    )
+
+    producer = DurableQueue(root, policy=policy, agent_id="producer")
+    worker = DurableQueue(root, policy=policy, agent_id="worker")
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    assert producer.read_task(task_id)["status"] == "pending"
+    task_claim = worker.claim(now)
+    assert task_claim and task_claim["task_id"] == task_id
+    assert worker.finish(
+        task_id=task_id,
+        lease_id=task_claim["lease_id"],
+        result="legacy task done",
+        failed=False,
+        now=now,
+    ) == "completed"
+    assert producer.read_task(task_id)["result"] == "legacy task done"
+
+    assert producer.read_answer(consultation_id, now=now)["status"] == "pending"
+    question_claim = worker.claim_question(now)
+    assert question_claim and question_claim["consultation_id"] == consultation_id
+    assert worker.answer_question(
+        consultation_id=consultation_id,
+        lease_id=question_claim["lease_id"],
+        answer="legacy answer",
+        now=now,
+    ) == "answered"
+    assert producer.read_answer(consultation_id, now=now)["answer"] == "legacy answer"
+
+
+@pytest.mark.parametrize(
+    ("routes", "include_task", "include_consultation"),
+    [
+        ({("producer", "other"): {"task", "consultation"}}, True, True),
+        ({("producer", "worker"): {"consultation"}}, True, False),
+        ({("producer", "worker"): {"task"}}, False, True),
+    ],
+    ids=("absent-edge", "consultation-only-rejects-task", "task-only-rejects-consultation"),
+)
+def test_incompatible_policy_refuses_parent_format_before_mutation(
+    tmp_path: Path,
+    routes: dict[tuple[str, str], set[str]],
+    include_task: bool,
+    include_consultation: bool,
+) -> None:
+    root = tmp_path / "parent"
+    _create_parent_format_state(
+        root,
+        include_task=include_task,
+        include_consultation=include_consultation,
+    )
+    before = _parent_record_bytes(root)
+    policy = _policy({"producer", "worker", "other"}, routes)
+
+    with pytest.raises(QueueRefused, match="^request refused$"):
+        DurableQueue(root, policy=policy, agent_id="producer")
+
+    assert not (root / "policy.json").exists()
+    assert _parent_record_bytes(root) == before

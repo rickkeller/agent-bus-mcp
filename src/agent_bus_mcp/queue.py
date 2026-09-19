@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import secrets
 from types import MappingProxyType
-from typing import Iterable, Iterator, Mapping
+from typing import Iterable, Iterator, Mapping, TypeGuard
 import unicodedata
 from urllib.parse import urlsplit
 
@@ -90,9 +90,13 @@ def _identifier(value: str, prefix: str) -> bool:
     return value.startswith(prefix) and len(suffix) == 32 and all(char in "0123456789abcdef" for char in suffix)
 
 
-def _identity(value: str) -> bool:
+def _identity(value: object) -> TypeGuard[str]:
     """Closed, portable identity syntax; authorization is configured locally."""
-    return isinstance(value, str) and 1 <= len(value) <= 64 and all(char.isalnum() or char in "_-" for char in value)
+    return (
+        type(value) is str
+        and 1 <= len(value) <= 64
+        and all(char in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for char in value)
+    )
 
 
 class RoutePolicy:
@@ -220,6 +224,19 @@ class DurableQueue:
                 if self._read(policy_path) != self.policy.as_record():
                     raise QueueRefused()
             else:
+                for records, mode in (
+                    (self._tasks(), "task"),
+                    (self._consultations(), "consultation"),
+                ):
+                    for record in records:
+                        source = record.get("producer_id")
+                        destination = record.get("worker_id")
+                        if (
+                            not _identity(source)
+                            or not _identity(destination)
+                            or not self.policy.allows(source, destination, mode)
+                        ):
+                            raise QueueRefused()
                 self._write(policy_path, self.policy.as_record())
 
     @contextmanager

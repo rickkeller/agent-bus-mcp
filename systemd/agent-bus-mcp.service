@@ -1,0 +1,19 @@
+[Unit]
+Description=Agent Bus MCP bridge
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/agent-bus-mcp/env
+# State must survive reboot; operator creates %h/.local/state/agent-bus-mcp with 0700.
+ExecStart=/usr/bin/env agent-bus-mcp
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/state/agent-bus-mcp
+
+[Install]
+WantedBy=default.target

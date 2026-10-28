@@ -18,6 +18,7 @@ src/agent_bus_mcp/
 tests/                   pytest suite
 systemd/                 example user units. Review them before use and never enable them from here
 docs/REQUIREMENTS.md     requirements
+docs/ENDPOINTS.md        how to connect installed endpoints
 .env.example             the six AGENT_BUS_* variables, with placeholders only
 SECURITY.md              threat model and operator responsibilities
 ```

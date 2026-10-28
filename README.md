@@ -42,7 +42,7 @@ chmod 600 "$HOME/.config/agent-bus-mcp/env"
 | `AGENT_BUS_PRODUCER_ID` | yes | ID of the local agent that creates work. 1–64 characters from `[A-Za-z0-9_-]`. |
 | `AGENT_BUS_WORKER_ID` | yes | ID of the agent that connects over MCP and does the work. Same rules. |
 
-These six variables give the simple two-agent setup. To use a larger graph of agents, build a `RoutePolicy` in Python (see [Consultation API](#consultation-api)).
+These six variables give the simple two-agent server. To connect more than those two, use [docs/ENDPOINTS.md](docs/ENDPOINTS.md). That file is the allowlist. You do not have to build the policy in Python.
 
 ## Quickstart
 

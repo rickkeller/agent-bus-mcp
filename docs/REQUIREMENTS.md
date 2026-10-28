@@ -28,6 +28,6 @@ Agent Bus is a shared communications fabric. It is not an Otto app. OpenClaw, gr
 
 Two non-Otto peers. One agent starts one question. The other answers. No human starts it. No file, no timer, and no Core hop in that first proof.
 
-## Already built, not this specification
+## Already built, not the first proof
 
-The local policy graph in this repository can store directed edges and separate a question from a task. That slice is kept. It is not the fabric above. The running Otto worker and `handoff_to_core` are outside this repository and are not the plan.
+A local command, `agent-bus-endpoint`, can send one chat or one HTTPS pointer on an allowlisted edge. The sender is the process id. See `docs/ENDPOINTS.md`. Jig can file a claimed chat as an ask when `bus.json` is present. That is not the first proof. The other program still needs its own client, or a person runs the command. No timer, no retry, and no live pair has been started.

@@ -11,6 +11,8 @@ src/agent_bus_mcp/
   __init__.py            exports DurableQueue, QueueRefused, RoutePolicy
   queue.py               RoutePolicy and the principal-bound DurableQueue (tasks, consultations, leases, idempotency)
   mcp.py                 MCPApplication (ASGI, bearer auth, POST /mcp JSON-RPC, five tools) and the `agent-bus-mcp` entry point
+  endpoint.py            `agent-bus-endpoint`, the local sender for one configured endpoint
+  endpoints.py           allowlist loader for chat and handoff
   recurring.py           `agent-bus-public-research`, an example recurring task producer
   research_manifest.json example manifest for recurring.py (uses a .invalid domain)
 tests/                   pytest suite

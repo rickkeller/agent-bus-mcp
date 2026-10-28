@@ -106,7 +106,7 @@ These six variables give the simple two-agent setup. To use a larger graph of ag
 ### Two ways to use it
 
 - **Quick question:** use an edge whose policy allows `consultation` to ask for one short piece of advice, such as “Which heading is clearer?” The question expires, its addressed adviser may answer it once, and nothing is carried out automatically.
-- **Formal task:** use an edge whose policy allows `task` to hand off a bounded job with a goal and optional public web references. Its addressed worker claims it, then marks it completed or failed.
+- **Formal task:** use an edge whose policy allows `task` to hand off a bounded job with a goal and optional public web references. Its addressed worker claims it, then marks it completed or failed. A coding request is this formal task, created only by the local producer through `submit_coding_request`. It is not an advice question, and it is not an MCP tool.
 
 For example, an agent preparing a weekly update can ask, “Should the risks be a table or a short list?” The adviser can answer, “Use a short list for three items.” If someone then wants the report changed, the operator explicitly creates a normal task. The answer itself cannot make the change.
 
@@ -124,6 +124,21 @@ The MCP worker surface exposes exactly five tools:
 - `claim_question` and `answer_question` for advice-only consultations.
 
 Each bearer-authenticated `MCPApplication` wraps one principal-bound queue object. MCP calls cannot choose or override source, worker, agent, or destination identities. No tool fetches URLs, opens files, runs a shell command, routes to another worker, or creates a consultation or task.
+
+### Connect installed endpoints
+
+Copy `examples/endpoints.json`, keep the names you want, and delete the rest. `chat` is one expiring message. `handoff` is one public HTTPS pointer. The bus does not call a model, fetch the pointer, or carry file bytes.
+
+Each endpoint is a local process. Set `AGENT_BUS_STATE_DIR` to one shared directory, `AGENT_BUS_CONFIG` to that file, and `AGENT_BUS_ENDPOINT_ID` to this process. A message cannot name a different sender.
+
+```sh
+AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint post-chat --to jig --text "what version are you on" --key once
+AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint claim-chat
+AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
+AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint read-chat CONSULTATION_ID
+```
+
+A pair that is not in the file is refused. The remote MCP server still cannot create a message. Creation stays on this local command.
 
 ### Consultation API
 

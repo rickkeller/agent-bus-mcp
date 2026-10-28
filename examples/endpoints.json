@@ -1,0 +1,10 @@
+{
+  "endpoints": ["jig", "grokbot", "openclaw", "hermes", "dots"],
+  "allow": [
+    {"from": "grokbot", "to": "jig", "kinds": ["chat"]},
+    {"from": "jig", "to": "grokbot", "kinds": ["chat"]},
+    {"from": "dots", "to": "openclaw", "kinds": ["chat", "handoff"]},
+    {"from": "openclaw", "to": "hermes", "kinds": ["chat", "handoff"]},
+    {"from": "hermes", "to": "openclaw", "kinds": ["chat"]}
+  ]
+}

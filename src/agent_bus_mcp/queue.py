@@ -620,5 +620,48 @@ class DurableQueue:
                 raise QueueRefused()
             return task
 
+    def submit_coding_request(
+        self,
+        *,
+        goal: str,
+        references: list[str],
+        idempotency_key: str,
+        destination_id: str | None = None,
+    ) -> str:
+        """Create a formal task from the local producer.
+
+        A coding request is not an advice question and is not an MCP tool.
+        """
+        return self.enqueue(
+            goal=goal,
+            references=references,
+            idempotency_key=idempotency_key,
+            destination_id=destination_id,
+        )
+
+    def read_coding_request(
+        self,
+        idempotency_key: str,
+        *,
+        destination_id: str | None = None,
+    ) -> dict:
+        """Read the formal task created for one local coding-request key."""
+        destination = self._destination(destination_id, "task")
+        if (
+            not isinstance(idempotency_key, str)
+            or idempotency_key in ("", ".", "..")
+            or len(idempotency_key) > 160
+            or not all(char.isalnum() or char in "._-" for char in idempotency_key)
+        ):
+            raise QueueRefused()
+        with self._locked():
+            key_path = self._idempotency_path("idempotency", destination, idempotency_key)
+            if not key_path.is_file():
+                raise QueueRefused()
+            task_id = self._read(key_path).get("task_id")
+        if not isinstance(task_id, str):
+            raise QueueRefused()
+        return self.read_task(task_id)
+
     def inspect(self, task_id: str) -> dict:
         return self.read_task(task_id)

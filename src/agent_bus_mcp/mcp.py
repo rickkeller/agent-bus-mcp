@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import hmac
 import json
@@ -126,22 +127,47 @@ class MCPApplication:
         await send({"type": "http.response.body", "body": body})
 
 
-def main() -> int:
+REQUIRED_ENV = (
+    "AGENT_BUS_STATE_DIR",
+    "AGENT_BUS_BEARER_SECRET",
+    "AGENT_BUS_PORT",
+    "AGENT_BUS_PRODUCER_ID",
+    "AGENT_BUS_WORKER_ID",
+)
+KNOWN_ENV = REQUIRED_ENV + ("AGENT_BUS_BIND_HOST",)
+
+
+def missing_env() -> list[str]:
+    return [name for name in REQUIRED_ENV if not os.environ.get(name)]
+
+
+def main(argv: list[str] | None = None) -> int:
     """Run with an ASGI server installed by the deployer, bound to loopback."""
+    listed = "\n".join(
+        f"  {name}" + ("" if name in REQUIRED_ENV else " (optional, default loopback)")
+        for name in KNOWN_ENV
+    )
+    parser = argparse.ArgumentParser(
+        description="Loopback MCP bridge. --help does not start the server.",
+        epilog="environment:\n" + listed,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.parse_args([] if argv is None else argv)
+    missing = missing_env()
+    if missing:
+        raise SystemExit(
+            "required environment is missing: " + ", ".join(missing) + "\nenvironment:\n" + listed
+        )
     try:
         import uvicorn
     except ImportError as exc:  # pragma: no cover
         raise SystemExit("install an ASGI server to run the bridge") from exc
-    state = os.environ.get("AGENT_BUS_STATE_DIR")
-    bearer_secret = os.environ.get("AGENT_BUS_BEARER_SECRET")
-    producer_id = os.environ.get("AGENT_BUS_PRODUCER_ID")
-    worker_id = os.environ.get("AGENT_BUS_WORKER_ID")
-    if not state or not bearer_secret or not producer_id or not worker_id:
-        raise SystemExit("required environment is missing")
+    state = os.environ["AGENT_BUS_STATE_DIR"]
+    bearer_secret = os.environ["AGENT_BUS_BEARER_SECRET"]
+    producer_id = os.environ["AGENT_BUS_PRODUCER_ID"]
+    worker_id = os.environ["AGENT_BUS_WORKER_ID"]
     host = os.environ.get("AGENT_BUS_BIND_HOST", "loopback")
-    port_text = os.environ.get("AGENT_BUS_PORT")
-    if not port_text:
-        raise SystemExit("required environment is missing")
+    port_text = os.environ["AGENT_BUS_PORT"]
     try:
         port = int(port_text)
     except ValueError as exc:

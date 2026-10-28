@@ -3,7 +3,9 @@ import inspect
 import json
 from pathlib import Path
 
-from agent_bus_mcp.mcp import MCPApplication, TOOLS
+import pytest
+
+from agent_bus_mcp.mcp import MCPApplication, TOOLS, main
 from agent_bus_mcp.queue import DurableQueue
 
 
@@ -166,3 +168,33 @@ def test_mcp_corrupt_task_record_is_sanitized(tmp_path: Path) -> None:
     app = MCPApplication(queue, "synthetic-secret")
     response = _request(app, [(b"authorization", b"Bearer synthetic-secret")], b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"claim_task","arguments":{}}}')
     assert json.loads(response[1]["body"]) == {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "request refused"}}
+
+
+def test_help_lists_env_and_startup_names_the_missing_ones(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    for name in (
+        "AGENT_BUS_STATE_DIR",
+        "AGENT_BUS_BEARER_SECRET",
+        "AGENT_BUS_PORT",
+        "AGENT_BUS_PRODUCER_ID",
+        "AGENT_BUS_WORKER_ID",
+        "AGENT_BUS_BIND_HOST",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(SystemExit) as help_exit:
+        main(["--help"])
+    assert help_exit.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "AGENT_BUS_STATE_DIR" in help_text
+    assert "AGENT_BUS_BIND_HOST" in help_text
+    with pytest.raises(SystemExit) as missing:
+        main([])
+    message = str(missing.value)
+    assert "AGENT_BUS_PORT" in message
+    assert "AGENT_BUS_WORKER_ID" in message
+    monkeypatch.setenv("AGENT_BUS_STATE_DIR", "/tmp/unused")
+    monkeypatch.setenv("AGENT_BUS_BEARER_SECRET", "synthetic")
+    monkeypatch.setenv("AGENT_BUS_PRODUCER_ID", "producer")
+    monkeypatch.setenv("AGENT_BUS_WORKER_ID", "worker")
+    with pytest.raises(SystemExit) as still_missing:
+        main([])
+    assert "missing: AGENT_BUS_PORT" in str(still_missing.value)

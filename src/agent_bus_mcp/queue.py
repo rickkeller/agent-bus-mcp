@@ -296,9 +296,12 @@ class DurableQueue:
         (self.root / "consultations").mkdir(exist_ok=True, mode=0o700)
         (self.root / "consultation_idempotency").mkdir(exist_ok=True, mode=0o700)
         self._lock_path = self.root / ".queue.lock"
+        self._lock_path.touch(exist_ok=True)
+        os.chmod(self._lock_path, 0o600)
         with self._locked():
             policy_path = self.root / "policy.json"
             if policy_path.exists():
+                os.chmod(policy_path, 0o600)
                 if self._read(policy_path) != self.policy.as_record():
                     raise QueueRefused()
             else:
@@ -357,6 +360,7 @@ class DurableQueue:
             handle.flush()
             os.fsync(handle.fileno())
         temporary.replace(path)
+        os.chmod(path, 0o600)
         directory_fd = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(directory_fd)

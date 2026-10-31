@@ -4,6 +4,38 @@ A small, local, authenticated [MCP](https://modelcontextprotocol.io) server that
 
 > **Status: early (0.1.0).** This is the local durable core. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
 
+## Connect jig and grokbot
+
+This is one machine. Both programs share one state directory. If grokbot is on another computer, this package cannot connect them.
+
+You do not start the MCP server for this. That server cannot create a message.
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+install -d -m 700 "$HOME/.local/state/agent-bus-mcp" "$HOME/.config/agent-bus-mcp"
+cp examples/jig-grokbot.json "$HOME/.config/agent-bus-mcp/endpoints.json"
+chmod 600 "$HOME/.config/agent-bus-mcp/endpoints.json"
+export AGENT_BUS_STATE_DIR="$HOME/.local/state/agent-bus-mcp"
+export AGENT_BUS_CONFIG="$HOME/.config/agent-bus-mcp/endpoints.json"
+AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint post-chat --to jig --text "what version are you on" --key once
+AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint claim-chat
+```
+
+Copy `consultation_id` and `lease_id` from the claim line, then:
+
+```sh
+AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
+AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint read-chat CONSULTATION_ID
+```
+
+A pair that is not in the file is refused. Jig can file a claimed chat as an ask when its data directory has `bus.json` with `state_dir`, `config`, and `endpoint_id` set to `jig`. Jig does not reply. grokbot has no client in this package, so a person runs the command above for it.
+
+## Worker door
+
+The MCP server is a later door. It can claim and answer. It cannot create a message. The six environment variables and the Python snippet below are for that door, not for connecting jig to grokbot.
+
 Agent Bus MCP is one logical bus for many configured agent principals behind authenticated adapters. Its local durable core stores policy-controlled, directed many-to-many pathways for quick advice and bounded jobs. A controller can give different jobs to multiple workers—virtual one-to-many assignments over shared state—without owning or monopolizing the transport.
 
 ## Requirements

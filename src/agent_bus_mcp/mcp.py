@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 from .queue import DurableQueue
 
 MAX_BODY_BYTES = 16 * 1024
+_LOG = logging.getLogger("agent_bus_mcp.request")
 TOOLS = (
     {"name": "claim_task", "description": "Claim one pending or expired-lease task for the configured worker. No arguments. On success returns status=claimed with task_id, goal, references, lease_id, and lease_expires_at for a 900-second lease. If none is available returns status=empty.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "complete_task", "description": "Complete the exact active lease. Requires task_id, lease_id, and result (maximum 2048 bytes); returns completed or already_completed. Refuses stale or mismatched leases.", "inputSchema": {"type": "object", "properties": {"task_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}, "result": {"type": "string", "maxLength": 2048}}, "required": ["task_id", "lease_id", "result"], "additionalProperties": False}},
@@ -20,6 +22,19 @@ TOOLS = (
     {"name": "claim_question", "description": "Claim one pending advice-only question for the configured worker. No arguments. Returns status=claimed with the bounded question and lease, or status=empty.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "answer_question", "description": "Answer the exact active lease exactly once. Requires consultation_id, lease_id, and a bounded answer; stale, mismatched, expired, or already answered consultations are refused.", "inputSchema": {"type": "object", "properties": {"consultation_id": {"type": "string", "maxLength": 80}, "lease_id": {"type": "string", "maxLength": 80}, "answer": {"type": "string", "maxLength": 2048}}, "required": ["consultation_id", "lease_id", "answer"], "additionalProperties": False}},
 )
+
+
+def _note(method: str, status: int, *, tools: int | None = None, tool: str | None = None) -> None:
+    """Record one request. Never include a token, a header, or a body."""
+    known = {item["name"] for item in TOOLS}
+    parts = [f"method={method}", f"status={status}"]
+    if tools is not None:
+        parts.append(f"tools={tools}")
+    if tool in known:
+        parts.append(f"tool={tool}")
+    elif tool is not None:
+        parts.append("tool=unknown")
+    _LOG.info(" ".join(parts))
 
 
 def _error(request_id: Any, code: int = -32600) -> dict:
@@ -51,6 +66,7 @@ class MCPApplication:
         supplied = headers.get(b"authorization", b"").decode("ascii", "ignore")
         expected = f"Bearer {self.bearer_secret}"
         if scope.get("type") != "http" or scope.get("method") != "POST" or scope.get("path") != "/mcp" or not hmac.compare_digest(supplied, expected):
+            _note("-", 401)
             await self._send(send, 401, b"request refused", content_type=b"text/plain; charset=utf-8")
             return
         body = b""
@@ -58,10 +74,12 @@ class MCPApplication:
             event = await receive()
             body += event.get("body", b"")
             if len(body) > MAX_BODY_BYTES:
+                _note("-", 400)
                 await self._send(send, 400, b"request refused", content_type=b"text/plain; charset=utf-8")
                 return
             if not event.get("more_body"):
                 break
+        request: object = None
         try:
             request = json.loads(body)
             # This stateless endpoint explicitly rejects JSON-RPC batches. It
@@ -69,9 +87,24 @@ class MCPApplication:
             response = _error(None) if isinstance(request, list) else self._dispatch(request)
         except Exception:
             response = _error(None)
+        method = "-"
+        tool_name = None
+        tool_count = None
+        if isinstance(request, dict) and isinstance(request.get("method"), str):
+            method = request["method"] if request["method"] in {"ping", "initialize", "tools/list", "tools/call"} else "unknown"
+            params = request.get("params")
+            if method == "tools/call" and isinstance(params, dict):
+                name = params.get("name")
+                tool_name = name if isinstance(name, str) else ""
+        if isinstance(response, dict):
+            result = response.get("result")
+            if isinstance(result, dict) and isinstance(result.get("tools"), list):
+                tool_count = len(result["tools"])
         if response is None:
+            _note(method, 202, tools=tool_count, tool=tool_name)
             await self._send(send, 202, b"", content_type=None)
             return
+        _note(method, 200, tools=tool_count, tool=tool_name)
         await self._send(send, 200, json.dumps(response, separators=(",", ":")).encode())
 
     def _dispatch(self, request: object) -> dict | None:

@@ -1,0 +1,7 @@
+{
+  "endpoints": ["jig", "grokbot"],
+  "allow": [
+    {"from": "grokbot", "to": "jig", "kinds": ["chat"]},
+    {"from": "jig", "to": "grokbot", "kinds": ["chat"]}
+  ]
+}

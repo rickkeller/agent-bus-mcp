@@ -78,6 +78,26 @@ def test_handoff_is_a_pointer_not_file_bytes(tmp_path: Path) -> None:
         post_handoff(sender, to="grokbot", pointer="file:///tmp/note", key="file-2")
 
 
+def test_jig_grokbot_example_is_the_first_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    example = Path(__file__).parents[1] / "examples" / "jig-grokbot.json"
+    config = tmp_path / "endpoints.json"
+    config.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("AGENT_BUS_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("AGENT_BUS_CONFIG", str(config))
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "grokbot")
+    assert main(["post-chat", "--to", "jig", "--text", "what version are you on", "--key", "once"]) == 0
+    sent = json.loads(capsys.readouterr().out)
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "jig")
+    assert main(["claim-chat"]) == 0
+    claimed = json.loads(capsys.readouterr().out)
+    assert claimed["question"] == "what version are you on"
+    assert main(["answer-chat", "--id", claimed["consultation_id"], "--lease", claimed["lease_id"], "--text", "0.1.0"]) == 0
+    capsys.readouterr()
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "grokbot")
+    assert main(["read-chat", sent["consultation_id"]]) == 0
+    assert json.loads(capsys.readouterr().out)["answer"] == "0.1.0"
+
+
 def test_cli_uses_the_process_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     config = _config(tmp_path)
     state = tmp_path / "state"

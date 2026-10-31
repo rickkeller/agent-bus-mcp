@@ -25,6 +25,20 @@ def test_idempotency_and_public_https_only(tmp_path: Path) -> None:
             queue.enqueue(goal="read", references=[], idempotency_key=key)
 
 
+def test_state_files_are_owner_only(tmp_path: Path) -> None:
+    import os
+
+    previous = os.umask(0o022)
+    try:
+        DurableQueue(tmp_path / "state", producer_id="producer", worker_id="worker")
+    finally:
+        os.umask(previous)
+    state = tmp_path / "state"
+    assert state.stat().st_mode & 0o777 == 0o700
+    assert (state / ".queue.lock").stat().st_mode & 0o777 == 0o600
+    assert (state / "policy.json").stat().st_mode & 0o777 == 0o600
+
+
 def test_existing_state_directory_is_private(tmp_path: Path) -> None:
     tmp_path.chmod(0o755)
     DurableQueue(tmp_path, producer_id="producer", worker_id="worker")

@@ -7,7 +7,7 @@ The bus carries two kinds of message. It does not call a model, and it does not 
 
 ## Allowlist
 
-Copy `examples/endpoints.json` to a private file. Keep the endpoint names you want and delete the rest. An edge says who may send which kind to whom. A missing edge is refused.
+For the first pair, copy `examples/jig-grokbot.json`. It allows chat from grokbot to jig and from jig to grokbot. Copy `examples/endpoints.json` only when you want the other names. Keep the endpoint names you want and delete the rest. An edge says who may send which kind to whom. A missing edge is refused.
 
 An endpoint id is 1–64 characters from `A-Z`, `a-z`, `0-9`, `_`, or `-`. Do not put a token, a host path, or a chat id in this file.
 

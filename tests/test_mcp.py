@@ -27,6 +27,40 @@ def _request(app: MCPApplication, headers: list[tuple[bytes, bytes]], body: byte
     return sent
 
 
+def test_request_log_counts_tools_and_omits_the_secret(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
+    headers = [
+        (b"authorization", b"Bearer synthetic-secret"),
+        (b"content-type", b"application/json"),
+    ]
+    with caplog.at_level(logging.INFO, logger="agent_bus_mcp.request"):
+        listed = _request(
+            app,
+            headers,
+            b'{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}',
+        )
+        called = _request(
+            app,
+            headers,
+            b'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"claim_task","arguments":{}}}',
+        )
+    assert listed[0]["status"] == 200
+    assert called[0]["status"] == 200
+    assert "method=tools/list status=200 tools=5" in caplog.text
+    assert "method=tools/call status=200 tool=claim_task" in caplog.text
+    assert "synthetic-secret" not in caplog.text
+    assert "Bearer" not in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="agent_bus_mcp.request"):
+        refused = _request(app, [(b"authorization", b"Bearer wrong-token")], b"{}")
+    assert refused[0]["status"] == 401
+    assert "method=- status=401" in caplog.text
+    assert "wrong-token" not in caplog.text
+    assert "synthetic-secret" not in caplog.text
+
+
 def test_only_the_closed_task_and_consultation_tools_are_discoverable(tmp_path: Path) -> None:
     app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
     response = app._dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})

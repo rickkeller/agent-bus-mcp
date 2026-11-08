@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bus-mcp"
-version = "0.1.0"
+version = "0.2.0"
 description = "A local durable bus for policy-controlled agent questions and bounded tasks"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,10 @@ test = ["pytest>=8"]
 agent-bus-mcp = "agent_bus_mcp.mcp:main"
 agent-bus-endpoint = "agent_bus_mcp.endpoint:main"
 agent-bus-public-research = "agent_bus_mcp.recurring:main"
+agent-bus-remote = "agent_bus_mcp.remote:main"
+agent-bus-enroll = "agent_bus_mcp.enroll:main"
+agent-bus-remote-call = "agent_bus_mcp.remote_call:main"
+agent-bus-hermes-adapt = "agent_bus_mcp.hermes_adapter:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

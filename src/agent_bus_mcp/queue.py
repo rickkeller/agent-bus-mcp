@@ -114,6 +114,18 @@ def _identity(value: object) -> TypeGuard[str]:
     )
 
 
+def _claimed_board(task: dict) -> dict:
+    """Return the board link only when this task was promoted. Ordinary tasks omit it."""
+    board = task.get("board")
+    post_id = task.get("post_id")
+    if not _identity(board) or type(post_id) is not str or not post_id.startswith("post_"):
+        return {}
+    suffix = post_id[5:]
+    if len(suffix) != 32 or any(char not in "0123456789abcdef" for char in suffix):
+        return {}
+    return {"board": board, "post_id": post_id}
+
+
 def _optional_parent_identifier(value: object, prefix: str) -> bool:
     return value is None or (type(value) is str and _identifier(value, prefix))
 
@@ -129,6 +141,23 @@ def _parent_stamp(value: object, *, optional: bool = False) -> bool:
         return False
     _parse_stamp(value)
     return True
+
+
+def _board_link_ok(record: dict) -> bool:
+    """A task omits the board link or carries one well-formed pair."""
+    if "board" not in record and "post_id" not in record:
+        return True
+    return _claimed_board(record) == {"board": record.get("board"), "post_id": record.get("post_id")}
+
+
+def _caller_key(value: object) -> bool:
+    return (
+        type(value) is str
+        and bool(value)
+        and value not in (".", "..")
+        and len(value) <= 160
+        and all(char.isalnum() or char in "._-" for char in value)
+    )
 
 
 def _valid_parent_record(record: dict, mode: str) -> bool:
@@ -147,6 +176,7 @@ def _valid_parent_record(record: dict, mode: str) -> bool:
             and _optional_parent_identifier(record.get("lease_id"), _LEASE_PREFIX)
             and _parent_stamp(record.get("lease_expires_at"), optional=True)
             and _optional_parent_text(record.get("result"), MAX_RESULT_BYTES)
+            and _board_link_ok(record)
         )
     if mode == "consultation":
         idempotency_key = record.get("idempotency_key")
@@ -293,6 +323,7 @@ class DurableQueue:
         os.chmod(self.root, 0o700)
         (self.root / "tasks").mkdir(exist_ok=True, mode=0o700)
         (self.root / "idempotency").mkdir(exist_ok=True, mode=0o700)
+        (self.root / "promotion_idempotency").mkdir(exist_ok=True, mode=0o700)
         (self.root / "consultations").mkdir(exist_ok=True, mode=0o700)
         (self.root / "consultation_idempotency").mkdir(exist_ok=True, mode=0o700)
         self._lock_path = self.root / ".queue.lock"
@@ -321,6 +352,12 @@ class DurableQueue:
                         ):
                             raise QueueRefused()
                 self._write(policy_path, self.policy.as_record())
+
+    def note_availability(self, endpoint: str) -> None:
+        """Wake one endpoint's parked wait. The caller holds the queue lock."""
+        from .availability import bump
+
+        bump(endpoint)
 
     @contextmanager
     def _locked(self) -> Iterator[None]:
@@ -402,7 +439,100 @@ class DurableQueue:
             task = {"task_id": task_id, "producer_id": producer, "worker_id": destination, "goal": goal, "references": references, "status": "pending", "lease_id": None, "lease_expires_at": None, "result": None}
             self._write(self._path(task_id), task)
             self._write(key_path, {"task_id": task_id})
+            self.note_availability(destination)
             return task_id
+
+    def _write_promoted_task(
+        self,
+        *,
+        goal: str,
+        destination_id: str,
+        board: str,
+        post_id: str,
+        promote_key: str,
+        existing_task_id: str | None = None,
+    ) -> str:
+        """Create or reuse one promoted task. The caller holds the queue lock.
+
+        The record is written with its board link in the same replacement as
+        the pending task, under a namespace ordinary idempotency keys cannot
+        occupy. The lock is still held when this returns, so no claim can run
+        until the caller finishes linking the post.
+        """
+        producer = self._source_id
+        if (
+            not _safe_text(goal, MAX_GOAL_BYTES)
+            or _claimed_board({"board": board, "post_id": post_id}) != {"board": board, "post_id": post_id}
+            or not _caller_key(promote_key)
+            or destination_id != self._destination(destination_id, "task")
+            or (existing_task_id is not None and not _identifier(existing_task_id, _TASK_PREFIX))
+        ):
+            raise QueueRefused()
+        idempotency_key = "promote-%s-%s" % (board, post_id)
+        key_path = self._idempotency_path("promotion_idempotency", destination_id, idempotency_key)
+
+        def finish(task_id: str) -> None:
+            task = self._read(self._path(task_id))
+            if (
+                task.get("producer_id") != producer
+                or task.get("worker_id") != destination_id
+                or task.get("goal") != goal
+                or task.get("board") not in (None, board)
+                or task.get("post_id") not in (None, post_id)
+            ):
+                raise QueueRefused()
+            if task.get("board") != board or task.get("post_id") != post_id:
+                task["board"] = board
+                task["post_id"] = post_id
+                self._write(self._path(task_id), task)
+
+        if key_path.exists():
+            stored = self._read(key_path)
+            task_id = stored.get("task_id")
+            if (
+                stored.get("promote_key") != promote_key
+                or stored.get("to") != destination_id
+                or stored.get("board") != board
+                or stored.get("post_id") != post_id
+                or type(task_id) is not str
+                or not _identifier(task_id, _TASK_PREFIX)
+                or (existing_task_id is not None and task_id != existing_task_id)
+            ):
+                raise QueueRefused()
+            finish(task_id)
+            return task_id
+        task_id = existing_task_id
+        if task_id is None:
+            task_id = f"{_TASK_PREFIX}{secrets.token_hex(16)}"
+            self._write(
+                self._path(task_id),
+                {
+                    "task_id": task_id,
+                    "producer_id": producer,
+                    "worker_id": destination_id,
+                    "goal": goal,
+                    "references": [],
+                    "status": "pending",
+                    "lease_id": None,
+                    "lease_expires_at": None,
+                    "result": None,
+                    "board": board,
+                    "post_id": post_id,
+                },
+            )
+        else:
+            finish(task_id)
+        self._write(
+            key_path,
+            {
+                "task_id": task_id,
+                "promote_key": promote_key,
+                "to": destination_id,
+                "board": board,
+                "post_id": post_id,
+            },
+        )
+        return task_id
 
     def ask_question(
         self,
@@ -575,22 +705,78 @@ class DurableQueue:
     def _tasks(self) -> list[dict]:
         return [self._read(path) for path in sorted((self.root / "tasks").glob("task_*.json"))]
 
-    def claim(self, now: datetime | None = None) -> dict | None:
+    def _claim_view(self, task: dict) -> dict:
+        returned = {key: task[key] for key in ("task_id", "goal", "references", "lease_id", "lease_expires_at")}
+        returned.update(_claimed_board(task))
+        return returned
+
+    def _claim_locked(self, instant: datetime, request_id: str | None = None) -> dict | None:
+        """Claim one task. The caller holds the queue lock."""
         worker = self._worker_id
+        for task in self._tasks():
+            if task.get("worker_id") != worker:
+                continue
+            expired = task["status"] == "leased" and _parse_stamp(task.get("lease_expires_at")) <= instant
+            if task["status"] not in ("pending",) and not expired:
+                continue
+            task["status"] = "leased"
+            task["lease_id"] = f"{_LEASE_PREFIX}{secrets.token_hex(16)}"
+            task["lease_expires_at"] = _stamp(instant + timedelta(seconds=LEASE_SECONDS))
+            if request_id is not None:
+                task["remote_request"] = request_id
+            self._write(self._path(task["task_id"]), task)
+            self.note_availability(worker)
+            return self._claim_view(task)
+        return None
+
+    def claim(self, now: datetime | None = None) -> dict | None:
+        with self._locked():
+            return self._claim_locked(_instant(now))
+
+    def _remote_claim_path(self, request_id: str) -> Path:
+        directory = self.root / "remote_claims" / self._worker_id
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return directory / request_id
+
+    def claim_for_request(self, request_id: str, now: datetime | None = None) -> dict:
+        """Claim at most once for this endpoint and request id.
+
+        A retry returns the stored result and does not take another task.
+        """
+        if not _caller_key(request_id):
+            raise QueueRefused()
         instant = _instant(now)
         with self._locked():
+            path = self._remote_claim_path(request_id)
+            if path.exists():
+                stored = self._read(path)
+                result = stored.get("result")
+                if stored.get("request_id") != request_id or type(result) is not dict:
+                    raise QueueRefused()
+                return result
             for task in self._tasks():
-                if task.get("worker_id") != worker:
+                if task.get("remote_request") == request_id and task.get("worker_id") == self._worker_id:
+                    result = {"status": "claimed", **self._claim_view(task)}
+                    self._write(path, {"request_id": request_id, "result": result})
+                    return result
+            claimed = self._claim_locked(instant, request_id)
+            result = {"status": "empty"} if claimed is None else {"status": "claimed", **claimed}
+            self._write(path, {"request_id": request_id, "result": result})
+            return result
+
+    def active_leases(self, now: datetime | None = None) -> list[dict]:
+        """List this endpoint's unexpired task leases. This does not claim."""
+        worker = self._worker_id
+        instant = _instant(now)
+        found: list[dict] = []
+        with self._locked():
+            for task in self._tasks():
+                if task.get("worker_id") != worker or task.get("status") != "leased":
                     continue
-                expired = task["status"] == "leased" and _parse_stamp(task.get("lease_expires_at")) <= instant
-                if task["status"] not in ("pending",) and not expired:
+                if _parse_stamp(task.get("lease_expires_at")) <= instant:
                     continue
-                task["status"] = "leased"
-                task["lease_id"] = f"{_LEASE_PREFIX}{secrets.token_hex(16)}"
-                task["lease_expires_at"] = _stamp(instant + timedelta(seconds=LEASE_SECONDS))
-                self._write(self._path(task["task_id"]), task)
-                return {key: task[key] for key in ("task_id", "goal", "references", "lease_id", "lease_expires_at")}
-        return None
+                found.append(self._claim_view(task))
+        return found
 
     def finish(self, *, task_id: str, lease_id: str, result: str | None, failed: bool, now: datetime | None = None) -> str:
         worker = self._worker_id
@@ -613,6 +799,7 @@ class DurableQueue:
             task["status"] = "failed" if failed else "completed"
             task["result"] = None if failed else result
             self._write(self._path(task_id), task)
+            self.note_availability(worker)
             return task["status"]
 
     def read_task(self, task_id: str) -> dict:
@@ -623,6 +810,23 @@ class DurableQueue:
             if task.get("producer_id") != self._source_id:
                 raise QueueRefused()
             return task
+
+    def read_result(self, task_id: str) -> dict:
+        """Read one promoted task's status and stored result.
+
+        The only allowed reader is the endpoint that promoted the post which
+        created the task: the task's producer. Every other endpoint is
+        refused. A task that was not promoted from a board has no promoting
+        endpoint, so that read is refused too. This does not claim,
+        acknowledge, or mutate the task, and it is not part of wait hints.
+        """
+        if not isinstance(task_id, str) or not _identifier(task_id, _TASK_PREFIX):
+            raise QueueRefused()
+        with self._locked():
+            task = self._read(self._path(task_id))
+            if not _claimed_board(task) or task.get("producer_id") != self._source_id:
+                raise QueueRefused()
+            return {"task_id": task_id, "status": task["status"], "result": task.get("result")}
 
     def submit_coding_request(
         self,

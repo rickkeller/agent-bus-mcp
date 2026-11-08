@@ -115,3 +115,40 @@ def test_cli_uses_the_process_endpoint(tmp_path: Path, monkeypatch: pytest.Monke
     assert main(["read-chat", sent["consultation_id"]]) == 0
     assert json.loads(capsys.readouterr().out)["answer"] == "hi"
     assert main(["post-chat", "--to", "dots", "--text", "no", "--key", "cli-2"]) == 2
+
+
+def test_file_accepted_is_work_and_blocks_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    config = tmp_path / "endpoints.json"
+    config.write_text(
+        json.dumps(
+            {
+                "endpoints": ["core", "jig"],
+                "allow": [{"from": "core", "to": "jig", "kinds": ["handoff"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = tmp_path / "state"
+    core = open_endpoint(state, config, "core")
+    from agent_bus_mcp.endpoints import file_accepted, read_accepted
+
+    first = file_accepted(core, to="jig", text="develop the intake", caller_id="core", key="once")
+    assert file_accepted(core, to="jig", text="develop the intake", caller_id="core", key="once") == first
+    assert file_accepted(core, to="jig", text="update the secretary note", caller_id="core", key="note") != first
+    assert list((state / "consultations").glob("consultation_*.json")) == []
+    with pytest.raises(QueueRefused):
+        file_accepted(core, to="jig", text="restart the gateway", caller_id="core", key="blocked")
+    with pytest.raises(QueueRefused):
+        file_accepted(core, to="jig", text="do not spend on this", caller_id="core", key="spend")
+    with pytest.raises(QueueRefused):
+        file_accepted(core, to="jig", text="develop the intake", caller_id="jig", key="spoof")
+    monkeypatch.setenv("AGENT_BUS_STATE_DIR", str(state))
+    monkeypatch.setenv("AGENT_BUS_CONFIG", str(config))
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "core")
+    assert main(["read-accepted", "--to", "jig", "--key", "once"]) == 0
+    read = json.loads(capsys.readouterr().out)
+    assert read["task_id"] == first
+    assert read["status"] == "pending"
+    assert read["result"] is None
+    assert "develop the intake" not in capsys.readouterr().out
+    assert read_accepted(core, to="jig", key="once")["status"] == "pending"

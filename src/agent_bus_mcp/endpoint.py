@@ -7,7 +7,16 @@ import os
 from pathlib import Path
 import sys
 
-from .endpoints import open_endpoint, post_chat, post_handoff
+from .endpoints import (
+    file_accepted,
+    open_endpoint,
+    post_board,
+    post_chat,
+    post_handoff,
+    promote_board,
+    read_accepted,
+    read_board,
+)
 from .queue import QueueRefused
 
 
@@ -63,6 +72,16 @@ def main(argv: list[str] | None = None) -> int:
                 lease_id=_flag(rest, "--lease"),
                 answer=_flag(rest, "--text"),
             )
+        elif command == "file-accepted":
+            result = file_accepted(
+                queue,
+                to=_flag(rest, "--to"),
+                text=_flag(rest, "--text"),
+                caller_id=_flag(rest, "--caller"),
+                key=_flag(rest, "--key"),
+            )
+        elif command == "read-accepted":
+            result = read_accepted(queue, to=_flag(rest, "--to"), key=_flag(rest, "--key"))
         elif command == "post-handoff":
             result = post_handoff(
                 queue,
@@ -74,6 +93,27 @@ def main(argv: list[str] | None = None) -> int:
             if rest:
                 raise QueueRefused()
             result = queue.claim()
+        elif command == "post-board":
+            result = post_board(
+                queue,
+                config=Path(_need("AGENT_BUS_CONFIG")),
+                board=_flag(rest, "--board"),
+                text=_flag(rest, "--text"),
+                key=_flag(rest, "--key"),
+            )
+        elif command == "read-board":
+            if rest != ["--board", _flag(rest, "--board")]:
+                raise QueueRefused()
+            result = read_board(queue, config=Path(_need("AGENT_BUS_CONFIG")), board=_flag(rest, "--board"))
+        elif command == "promote-board":
+            result = promote_board(
+                queue,
+                config=Path(_need("AGENT_BUS_CONFIG")),
+                board=_flag(rest, "--board"),
+                post_id=_flag(rest, "--post"),
+                key=_flag(rest, "--key"),
+                to=_flag(rest, "--to") if "--to" in rest else None,
+            )
         elif command == "complete-handoff":
             result = queue.finish(
                 task_id=_flag(rest, "--id"),

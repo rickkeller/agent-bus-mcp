@@ -1,14 +1,31 @@
 # Agent Bus MCP
 
+A local durable bus where configured endpoints can ask short questions and hand off bounded work. Package version 0.2.0 in this tree is a proposed version. It is not, by itself, a published release.
+
+The requirements and the technical specification are `docs/REQUIREMENTS.md`. Read `MIGRATION.md` before upgrading an existing install. Review [SECURITY.md](SECURITY.md) before connecting a worker.
+
 A small, local, authenticated [MCP](https://modelcontextprotocol.io) server that lets one AI agent hand **bounded tasks** and **quick advice-only questions** to other agents. Everything goes through a durable on-disk queue. A local producer creates the work, and a worker agent connects over MCP to claim it and answer it.
 
-> **Status: early (0.1.0).** This is the local durable core. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
+> **Status: proposed 0.2.0.** This is the local durable core. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
+
+## Connect two endpoints
+
+The names are yours. Copy `examples/two-endpoints.json`, replace `north` and `south`, and share one state directory on this machine. That shared directory is one computer. A second computer calls the TLS host in `docs/REMOTE.md` and does not mount the directory. Only the author can promote a post, and only to one other member of that board.
+
+```sh
+export AGENT_BUS_STATE_DIR="$HOME/.local/state/agent-bus-mcp"
+export AGENT_BUS_CONFIG="$HOME/.config/agent-bus-mcp/endpoints.json"
+AGENT_BUS_ENDPOINT_ID=north agent-bus-endpoint post-board --board room --text "south owns the fix" --key talk
+AGENT_BUS_ENDPOINT_ID=north agent-bus-endpoint promote-board --board room --post POST_ID --key own
+```
+
+A graph-bound MCP server can post and read that board as its own endpoint, and the author can promote. Use the same state directory and config. Set `AGENT_BUS_ENDPOINT_ID` to the member, and leave `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID` unset. A post does not create a task. The claim of the promoted handoff includes `board` and `post_id`. The server cannot post as a different endpoint, and the simple pair has no board. The commands and the refusal rules are in `docs/ENDPOINTS.md`.
 
 ## Connect jig and grokbot
 
 This is one machine. Both programs share one state directory. If grokbot is on another computer, this package cannot connect them.
 
-You do not start the MCP server for this. That server cannot create a message.
+You do not start the MCP server for this chat. That server cannot create a chat or a pointer.
 
 ```sh
 python3 -m venv .venv
@@ -34,13 +51,13 @@ A pair that is not in the file is refused. Jig can file a claimed chat as an ask
 
 ## Worker door
 
-The MCP server is a later door. It can claim and answer. It cannot create a message. The six environment variables and the Python snippet below are for that door, not for connecting jig to grokbot.
+The MCP server is a later door. It can claim and answer. On a graph it can also post, read, and promote a board it belongs to. It cannot create a chat, a pointer, or a task except by that author promotion. The environment variables and the Python snippet below are for that door, not for connecting jig to grokbot.
 
 Agent Bus MCP is one logical bus for many configured agent principals behind authenticated adapters. Its local durable core stores policy-controlled, directed many-to-many pathways for quick advice and bounded jobs. A controller can give different jobs to multiple workers—virtual one-to-many assignments over shared state—without owning or monopolizing the transport.
 
 ## Requirements
 
-- Python 3.11 or newer.
+- Python 3.11 or newer. On Debian and Ubuntu, install the `python3-venv` package before `python3 -m venv`. The base `python3` package does not include it, and the command fails with `ensurepip is not available`.
 - Linux or macOS. It needs Unix `fcntl` locks.
 - `uvicorn`, which is installed automatically as a dependency.
 - An MCP client that can send a plain stateless `POST /mcp` JSON-RPC request with a bearer token. There's no SSE or session support (see [Protocol boundary](#protocol-boundary)).
@@ -48,7 +65,7 @@ Agent Bus MCP is one logical bus for many configured agent principals behind aut
 ## Install
 
 ```sh
-git clone https://github.com/rickkeller/agent-bus-mcp.git
+git clone https://github.com/rickkeller/agent-bus-mcp.git agent-bus-mcp
 cd agent-bus-mcp
 python3 -m venv .venv
 . .venv/bin/activate
@@ -57,7 +74,7 @@ python -m pip install -e '.[test]'
 
 ## Configuration
 
-The server is configured only through environment variables. `.env.example` lists all six. Copy it to a private file outside the repo:
+The server is configured only through environment variables. `.env.example` lists the simple pair. Copy it to a private file outside the repo:
 
 ```sh
 install -d -m 700 "$HOME/.config/agent-bus-mcp" "$HOME/.local/state/agent-bus-mcp"
@@ -71,10 +88,12 @@ chmod 600 "$HOME/.config/agent-bus-mcp/env"
 | `AGENT_BUS_BEARER_SECRET` | yes | The bearer token clients must send. Generate a unique random value (for example `openssl rand -hex 32`), never reuse one, and rotate it if it leaks. |
 | `AGENT_BUS_BIND_HOST` | no (default `loopback`) | `loopback` is the only accepted value. The server listens on 127.0.0.1. |
 | `AGENT_BUS_PORT` | yes | Decimal TCP port, for example `8765`. |
-| `AGENT_BUS_PRODUCER_ID` | yes | ID of the local agent that creates work. 1–64 characters from `[A-Za-z0-9_-]`. |
-| `AGENT_BUS_WORKER_ID` | yes | ID of the agent that connects over MCP and does the work. Same rules. |
+| `AGENT_BUS_PRODUCER_ID` | simple pair | ID of the local agent that creates work. 1–64 characters from `[A-Za-z0-9_-]`. Omit this in graph mode. |
+| `AGENT_BUS_WORKER_ID` | simple pair | ID of the agent that connects over MCP and does the work. Same rules. Omit this in graph mode. |
+| `AGENT_BUS_CONFIG` | graph mode | Path of the endpoints allowlist. Set this with `AGENT_BUS_ENDPOINT_ID`, and leave the simple pair unset. |
+| `AGENT_BUS_ENDPOINT_ID` | graph mode | Endpoint id this MCP process claims and answers as. Same character rules. |
 
-These six variables give the simple two-agent server. To connect more than those two, use [docs/ENDPOINTS.md](docs/ENDPOINTS.md). That file is the allowlist. You do not have to build the policy in Python.
+The simple pair is one producer and one worker. A graph server binds to one id in the allowlist instead. To connect more than those two, use [docs/ENDPOINTS.md](docs/ENDPOINTS.md). That file is the allowlist. You do not have to build the policy in Python.
 
 ## Quickstart
 
@@ -124,8 +143,8 @@ These six variables give the simple two-agent server. To connect more than those
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `required environment is missing` | One of `AGENT_BUS_STATE_DIR`, `AGENT_BUS_BEARER_SECRET`, `AGENT_BUS_PORT`, `AGENT_BUS_PRODUCER_ID` or `AGENT_BUS_WORKER_ID` is unset. Did you run `set -a; . file; set +a` in this shell? |
-| `required environment is invalid` | `AGENT_BUS_PORT` is not a decimal number. |
+| `required environment is missing` | A required variable for the selected mode is unset. The simple pair needs `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID`. Graph mode needs `AGENT_BUS_CONFIG` and `AGENT_BUS_ENDPOINT_ID`. State, bearer, and port are always required. |
+| `required environment is invalid` | `AGENT_BUS_PORT` is not a decimal number, or the simple pair and graph mode are both set. |
 | `only loopback binding is supported` | Set `AGENT_BUS_BIND_HOST=loopback`, or leave it unset. |
 | `install an ASGI server to run the bridge` | `uvicorn` isn't installed in this environment. Re-run `pip install -e .`. |
 | HTTP 401 with an empty body | The `Authorization: Bearer …` header is missing or wrong, or the request wasn't a `POST` to exactly `/mcp`. |
@@ -142,7 +161,7 @@ These six variables give the simple two-agent server. To connect more than those
 
 For example, an agent preparing a weekly update can ask, “Should the risks be a table or a short list?” The adviser can answer, “Use a short list for three items.” If someone then wants the report changed, the operator explicitly creates a normal task. The answer itself cannot make the change.
 
-A quick question has no structured fields for file or web references, payloads, execution scope, attachments, a caller-selected source or return route, task completion, or delivery authority. The local producer selects only a policy-allowed destination. Do not put commands or credentials in free text. An answer cannot create or finish a task. Remote clients cannot create questions or tasks through this server; creation stays on a principal-bound local producer object.
+A quick question has no structured fields for file or web references, payloads, execution scope, attachments, a caller-selected source or return route, task completion, or delivery authority. The local producer selects only a policy-allowed destination. Do not put commands or credentials in free text. An answer cannot create or finish a task. Remote clients cannot create questions or ordinary tasks through this server. A graph-bound server can post on a member board. That post is not work. Only `promote_board`, called as the post's author, creates the one handoff.
 
 ### How the boundary works
 
@@ -150,16 +169,17 @@ Agent Bus MCP is a small, vendor-neutral, MIT-licensed Python package. `RoutePol
 
 Task and consultation records use separate directories. Idempotency is namespaced by mode, source, and destination. A single process lock, atomic JSON replacement, file and directory `fsync`, expiring leases, and lease fencing make state transitions durable and predictable.
 
-The MCP worker surface exposes exactly five tools:
+The MCP worker surface exposes eleven tools:
 
-- `claim_task`, `complete_task`, and `fail_task` for formal work.
+- `claim_task`, `complete_task`, `fail_task`, and `read_result` for formal work. `read_result` returns one promoted task's status and stored result only to the endpoint that promoted the post which created that task. Every other endpoint is refused. A task that was not promoted from a board is refused. The result text is not part of `wait_available`.
 - `claim_question` and `answer_question` for advice-only consultations.
+- `post_board`, `read_board`, `poll_unread`, `ack_board`, and `promote_board` for a graph-bound member. A board post is at most 2048 bytes. Reading and polling do not acknowledge. Own posts are not unread. `ack_board` names the posts that stop being unread. Each page has at most 20 posts. The simple pair refuses these five.
 
-Each bearer-authenticated `MCPApplication` wraps one principal-bound queue object. MCP calls cannot choose or override source, worker, agent, or destination identities. No tool fetches URLs, opens files, runs a shell command, routes to another worker, or creates a consultation or task.
+Each bearer-authenticated `MCPApplication` wraps one principal-bound queue object. MCP calls cannot choose or override source, worker, agent, or author identities. No tool fetches URLs, opens files, runs a shell command, or routes to another worker. A consultation or an ordinary task is still created only by the local process. `promote_board` is the one MCP call that creates a task, and only from a post that bound endpoint authored.
 
 ### Connect installed endpoints
 
-Copy `examples/endpoints.json`, keep the names you want, and delete the rest. `chat` is one expiring message. `handoff` is one public HTTPS pointer. The bus does not call a model, fetch the pointer, or carry file bytes.
+An installed program does not have to use one fixed product name. Copy `examples/endpoints.json`, keep the names you want, and delete the rest. `chat` is one expiring message. `handoff` is one public HTTPS pointer. The bus does not call a model, fetch the pointer, or carry file bytes.
 
 Each endpoint is a local process. Set `AGENT_BUS_STATE_DIR` to one shared directory, `AGENT_BUS_CONFIG` to that file, and `AGENT_BUS_ENDPOINT_ID` to this process. A message cannot name a different sender.
 
@@ -170,7 +190,7 @@ AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint answer-chat --id CONSULTATION_ID --
 AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint read-chat CONSULTATION_ID
 ```
 
-A pair that is not in the file is refused. The remote MCP server still cannot create a message. Creation stays on this local command.
+A pair that is not in the file is refused. Dots to OpenClaw, OpenClaw to Hermes, and Hermes to OpenClaw are the same commands with different ids. The MCP server still cannot create a chat or a pointer. Those stay on this local command.
 
 ### Consultation API
 
@@ -225,7 +245,7 @@ A bound local producer calls `enqueue` with a policy-allowed `destination_id`, a
 
 ### Protocol boundary
 
-The authenticated endpoint is stateless `POST /mcp` JSON-RPC. It accepts one request per POST and rejects batches. Notifications without an `id` receive HTTP 202 with an empty body. It supports `initialize`, `ping`, `tools/list`, and calls to the five tools above.
+The authenticated endpoint is stateless `POST /mcp` JSON-RPC. It accepts one request per POST and rejects batches. Notifications without an `id` receive HTTP 202 with an empty body. It supports `initialize`, `ping`, `tools/list`, and calls to the eleven tools above.
 
 This is intentionally not full Streamable HTTP: there are no sessions, SSE streams, resumability, server-initiated messages, or heartbeats. One MCP application serves one bound worker principal; multiple policy agents do not turn this adapter into a federated or multi-host transport. Confirm that the selected MCP client can use this stateless POST-only contract.
 

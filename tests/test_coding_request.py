@@ -28,8 +28,15 @@ def test_coding_request_is_a_local_task_not_a_question(tmp_path: Path) -> None:
         "claim_task",
         "complete_task",
         "fail_task",
+        "read_result",
         "claim_question",
         "answer_question",
+        "post_board",
+        "read_board",
+        "poll_unread",
+        "ack_board",
+        "promote_board",
     ]
+    assert "submit_coding_request" not in {tool["name"] for tool in TOOLS}
     with pytest.raises(QueueRefused):
         queue.read_coding_request("missing")

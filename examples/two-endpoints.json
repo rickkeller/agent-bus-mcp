@@ -1,0 +1,8 @@
+{
+  "endpoints": ["north", "south"],
+  "allow": [
+    {"from": "north", "to": "south", "kinds": ["chat", "handoff"]},
+    {"from": "south", "to": "north", "kinds": ["chat"]}
+  ],
+  "boards": [{"id": "room", "members": ["north", "south"]}]
+}

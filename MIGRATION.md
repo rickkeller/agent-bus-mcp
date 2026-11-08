@@ -48,4 +48,4 @@ Generate certificates for a test when that test needs them. Keep each private ke
 
 ## Not proven
 
-An old 0.1.0 client was not run against a 0.2.0 server in this candidate. A two-computer deployment was not rerun. A model was not called. A person who is not the author has not been shown to onboard from these docs alone.
+A 0.1.0-shaped client was run against a fresh 0.2.0 simple-pair server on loopback. `claim_task`, `complete_task`, `claim_question`, and `answer_question` used the old arguments and succeeded. The ordinary claim did not include `board` or `post_id`. `tools/list` returned eleven names, not five. After that server stopped, a 0.1.0 process opened the same directory and read the completed result and the answer. That was not a pre-existing 0.1.0 directory, not graph mode, and not the TLS door. A two-computer deployment was not rerun. A model was not called. A person who is not the author has not been shown to onboard from these docs alone.

@@ -36,6 +36,7 @@ def test_coding_request_is_a_local_task_not_a_question(tmp_path: Path) -> None:
         "poll_unread",
         "ack_board",
         "promote_board",
+        "ask",
     ]
     assert "submit_coding_request" not in {tool["name"] for tool in TOOLS}
     with pytest.raises(QueueRefused):

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bus-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local durable bus for policy-controlled agent questions and bounded tasks"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "Community maintainers"}]
-dependencies = ["uvicorn>=0.30"]
+dependencies = ["uvicorn>=0.30", "nats-py>=2.16.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

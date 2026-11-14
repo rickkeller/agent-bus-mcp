@@ -1,6 +1,6 @@
 # Migration from 0.1.0
 
-0.2.0 is this publication. No upgrade test of a live 0.1.0 directory was run. Treat the notes below as the safe path, not as a proof that every old client still interoperates.
+0.2.0 is the previous publication. 0.3.0 adds an optional ask tool and does not change the 0.1.0 migration path below. No upgrade test of a live 0.1.0 directory was run. Treat the notes below as the safe path, not as a proof that every old client still interoperates.
 
 ## Pin the old package
 

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .ask import ask
 from .endpoints import BOARD_PAGE_LIMIT, ack_board, open_endpoint, poll_unread, post_board, promote_board, read_board_page
 from .queue import DurableQueue, QueueRefused
 
@@ -28,6 +29,7 @@ TOOLS = (
     {"name": "poll_unread", "description": "Poll unread posts for the bound graph endpoint. Requires board. Optional after and limit match read_board. Own posts are not unread. Polling does not acknowledge. A later post cannot hide an unacknowledged earlier post: omit after to read from the oldest unread post.", "inputSchema": {"type": "object", "properties": {"board": {"type": "string", "maxLength": 64}, "after": {"type": "string", "maxLength": 80}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}}, "required": ["board"], "additionalProperties": False}},
     {"name": "ack_board", "description": "Acknowledge exact posts on a board for the bound graph endpoint. Requires board and posts, one to 20 post ids. Unknown ids refuse the whole call. Replay of the same ids is stable. This is the only way a post stops being unread.", "inputSchema": {"type": "object", "properties": {"board": {"type": "string", "maxLength": 64}, "posts": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string", "maxLength": 80}}}, "required": ["board", "posts"], "additionalProperties": False}},
     {"name": "promote_board", "description": "Promote one post authored by the bound graph endpoint. Requires board, post, and key. Optional to must be one other board member and a handoff target. The same key and destination returns the same handoff. A non-author, a second destination, or a non-member is refused. This is the only MCP tool that creates a task.", "inputSchema": {"type": "object", "properties": {"board": {"type": "string", "maxLength": 64}, "post": {"type": "string", "maxLength": 80}, "key": {"type": "string", "maxLength": 160}, "to": {"type": "string", "maxLength": 64}}, "required": ["board", "post", "key"], "additionalProperties": False}},
+    {"name": "ask", "description": "Ask one question on subject ask.<work> over NATS request/reply and wait for one answer. Requires work (one token of letters, digits, and hyphens; anything else is refused), text, and a positive timeout_s in seconds. One queue group takes each ask, so two listeners produce one answer. When nobody is listening it returns status=no_responders at once, without waiting out the deadline. A subscribed listener that stays silent returns status=timeout when the deadline passes. An answer returns status=answered. This tool does not create a board post, a task, or a consultation.", "inputSchema": {"type": "object", "properties": {"work": {"type": "string"}, "text": {"type": "string", "maxLength": 2048}, "timeout_s": {"type": "number", "exclusiveMinimum": 0}}, "required": ["work", "text", "timeout_s"], "additionalProperties": False}},
 )
 
 
@@ -51,11 +53,12 @@ def _error(request_id: Any, code: int = -32600) -> dict:
 class MCPApplication:
     """ASGI app: authenticate before buffering/parsing a request body."""
 
-    def __init__(self, queue: DurableQueue, bearer_secret: str, board_config: Path | None = None) -> None:
+    def __init__(self, queue: DurableQueue, bearer_secret: str, board_config: Path | None = None, nats_url: str | None = None) -> None:
         if not bearer_secret:
             raise ValueError("authentication secret required")
         self.queue, self.bearer_secret = queue, bearer_secret
         self.board_config = None if board_config is None else Path(board_config)
+        self.nats_url = None if nats_url is None else str(nats_url)
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         try:
@@ -73,7 +76,12 @@ class MCPApplication:
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         supplied = headers.get(b"authorization", b"").decode("ascii", "ignore")
         expected = f"Bearer {self.bearer_secret}"
-        if scope.get("type") != "http" or scope.get("method") != "POST" or scope.get("path") != "/mcp" or not hmac.compare_digest(supplied, expected):
+        authenticated = hmac.compare_digest(supplied, expected)
+        if scope.get("type") == "http" and scope.get("path") == "/mcp" and scope.get("method") != "POST" and authenticated:
+            _note("-", 405)
+            await self._send(send, 405, b"method not allowed", content_type=b"text/plain; charset=utf-8", extra=[(b"allow", b"POST")])
+            return
+        if scope.get("type") != "http" or scope.get("method") != "POST" or scope.get("path") != "/mcp" or not authenticated:
             _note("-", 401)
             await self._send(send, 401, b"request refused", content_type=b"text/plain; charset=utf-8")
             return
@@ -130,7 +138,7 @@ class MCPApplication:
         if method == "ping" and not params:
             return {"jsonrpc": "2.0", "id": request_id, "result": {}}
         if method == "initialize":
-            return {"jsonrpc": "2.0", "id": request_id, "result": {"protocolVersion": "2025-03-26", "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "agent-bus-mcp", "version": "0.2.0"}}}
+            return {"jsonrpc": "2.0", "id": request_id, "result": {"protocolVersion": "2025-03-26", "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "agent-bus-mcp", "version": "0.3.0"}}}
         if method == "tools/list" and not params:
             return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": list(TOOLS)}}
         if method != "tools/call" or set(params) != {"name", "arguments"} or not isinstance(params["arguments"], dict):
@@ -170,6 +178,8 @@ class MCPApplication:
                 "status": "promoted",
                 "task_id": self._promote(arguments["board"], arguments["post"], arguments["key"], arguments.get("to")),
             }
+        elif name == "ask" and set(arguments) == {"work", "text", "timeout_s"}:
+            result = self._asked(arguments["work"], arguments["text"], arguments["timeout_s"])
         else:
             return _error(request_id)
         return {"jsonrpc": "2.0", "id": request_id, "result": {"content": [{"type": "text", "text": json.dumps(result, separators=(",", ":"))}], "structuredContent": result}}
@@ -178,6 +188,12 @@ class MCPApplication:
         if self.board_config is None or self.queue.agent_id is None:
             raise QueueRefused()
         return self.board_config
+
+    def _asked(self, work: object, text: object, timeout_s: object) -> dict:
+        """One NATS ask. It does not create a board post, a task, or a consultation."""
+        if not isinstance(self.nats_url, str):
+            raise QueueRefused()
+        return ask(self.nats_url, work=work, text=text, timeout_s=timeout_s)
 
     def _posted(self, board: object, text: object, key: object) -> dict:
         if not all(isinstance(item, str) for item in (board, text, key)):
@@ -252,10 +268,12 @@ class MCPApplication:
         )
 
     @staticmethod
-    async def _send(send: Any, status: int, body: bytes, *, content_type: bytes | None = b"application/json") -> None:
+    async def _send(send: Any, status: int, body: bytes, *, content_type: bytes | None = b"application/json", extra: list[tuple[bytes, bytes]] | None = None) -> None:
         headers = [(b"content-length", str(len(body)).encode())]
         if content_type is not None:
             headers.insert(0, (b"content-type", content_type))
+        if extra:
+            headers.extend(extra)
         await send({"type": "http.response.start", "status": status, "headers": headers})
         await send({"type": "http.response.body", "body": body})
 
@@ -267,7 +285,7 @@ _ALWAYS_ENV = (
 )
 _LEGACY_ENV = ("AGENT_BUS_PRODUCER_ID", "AGENT_BUS_WORKER_ID")
 _GRAPH_ENV = ("AGENT_BUS_CONFIG", "AGENT_BUS_ENDPOINT_ID")
-KNOWN_ENV = _ALWAYS_ENV + ("AGENT_BUS_BIND_HOST",) + _LEGACY_ENV + _GRAPH_ENV
+KNOWN_ENV = _ALWAYS_ENV + ("AGENT_BUS_BIND_HOST", "AGENT_BUS_NATS_URL") + _LEGACY_ENV + _GRAPH_ENV
 
 
 def _filled(name: str) -> bool:
@@ -320,6 +338,8 @@ def open_configured_queue() -> DurableQueue:
 def _env_note(name: str) -> str:
     if name == "AGENT_BUS_BIND_HOST":
         return " (optional, default loopback)"
+    if name == "AGENT_BUS_NATS_URL":
+        return " (optional, NATS server for the ask tool)"
     if name in _GRAPH_ENV:
         return " (graph mode; omit the simple pair)"
     if name in _LEGACY_ENV:
@@ -359,7 +379,8 @@ def main(argv: list[str] | None = None) -> int:
     loopback = str(126 + 1) + ".0.0.1"
     queue = open_configured_queue()
     board_config = Path(os.environ["AGENT_BUS_CONFIG"]) if identity_mode() == "graph" else None
-    uvicorn.run(MCPApplication(queue, bearer_secret, board_config), host=loopback, port=port)
+    nats_url = os.environ.get("AGENT_BUS_NATS_URL") or None
+    uvicorn.run(MCPApplication(queue, bearer_secret, board_config, nats_url), host=loopback, port=port)
     return 0
 
 

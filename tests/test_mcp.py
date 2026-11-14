@@ -50,7 +50,7 @@ def test_request_log_counts_tools_and_omits_the_secret(tmp_path: Path, caplog: p
         )
     assert listed[0]["status"] == 200
     assert called[0]["status"] == 200
-    assert "method=tools/list status=200 tools=11" in caplog.text
+    assert "method=tools/list status=200 tools=12" in caplog.text
     assert "method=tools/call status=200 tool=claim_task" in caplog.text
     assert "synthetic-secret" not in caplog.text
     assert "Bearer" not in caplog.text
@@ -79,6 +79,7 @@ def test_only_the_closed_task_and_consultation_tools_are_discoverable(tmp_path: 
         "poll_unread",
         "ack_board",
         "promote_board",
+        "ask",
     ]
 
 
@@ -195,11 +196,16 @@ def test_mcp_boundary_refusals_are_sanitized_and_bounded(tmp_path: Path) -> None
 def test_mcp_authenticates_before_wrong_method_or_path_body_read(tmp_path: Path) -> None:
     app = MCPApplication(DurableQueue(tmp_path, producer_id="producer", worker_id="worker"), "synthetic-secret")
     headers = [(b"authorization", b"Bearer synthetic-secret")]
-    for method, path in (("GET", "/mcp"), ("POST", "/wrong")):
-        response = _request(app, headers, b"x" * (16 * 1024 + 1), method=method, path=path)
-        assert response[0]["status"] == 401
-        assert response[0]["headers"][0] == (b"content-type", b"text/plain; charset=utf-8")
-        assert response[1]["body"] == b"request refused"
+    stream = _request(app, headers, b"x" * (16 * 1024 + 1), method="GET", path="/mcp")
+    assert stream[0]["status"] == 405
+    assert (b"allow", b"POST") in stream[0]["headers"]
+    assert stream[1]["body"] == b"method not allowed"
+    wrong_path = _request(app, headers, b"x" * (16 * 1024 + 1), method="POST", path="/wrong")
+    assert wrong_path[0]["status"] == 401
+    assert wrong_path[1]["body"] == b"request refused"
+    missing = _request(app, [], b"x" * (16 * 1024 + 1), method="GET", path="/mcp")
+    assert missing[0]["status"] == 401
+    assert missing[1]["body"] == b"request refused"
 
 
 def test_mcp_ping_notifications_and_batches(tmp_path: Path) -> None:

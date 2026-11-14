@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+Published on the existing public history. The parent is the previous public tip. `v0.2.0` and `v0.1.0` were not moved.
+
+Added:
+
+- `ask`, one NATS request/reply question on `ask.<work>`. It does not create a board post, a task, or a consultation. Nobody listening returns `no_responders` at once.
+- Optional `AGENT_BUS_NATS_URL`. Without it, `ask` is refused.
+- A valid bearer on `GET /mcp` returns 405 with `Allow: POST`. A missing or wrong bearer is still 401.
+
 ## 0.2.0
 
 Published on the existing public history. The parent commit is the 0.1.0 baseline, tagged `v0.1.0`.

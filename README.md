@@ -1,12 +1,12 @@
 # Agent Bus MCP
 
-A local durable bus where configured endpoints can ask short questions and hand off bounded work. Package version 0.2.0 in this tree is a proposed version. It is not, by itself, a published release.
+A local durable bus where configured endpoints can ask short questions and hand off bounded work. Package version 0.3.0 in this tree is this publication. The previous public release remains `v0.2.0`.
 
 The requirements and the technical specification are `docs/REQUIREMENTS.md`. Read `MIGRATION.md` before upgrading an existing install. Review [SECURITY.md](SECURITY.md) before connecting a worker.
 
 A small, local, authenticated [MCP](https://modelcontextprotocol.io) server that lets one AI agent hand **bounded tasks** and **quick advice-only questions** to other agents. Everything goes through a durable on-disk queue. A local producer creates the work, and a worker agent connects over MCP to claim it and answer it.
 
-> **Status: proposed 0.2.0.** This is the local durable core. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
+> **Status: 0.3.0.** This is the local durable core, plus one optional NATS request/reply ask. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
 
 ## Connect two endpoints
 
@@ -169,11 +169,12 @@ Agent Bus MCP is a small, vendor-neutral, MIT-licensed Python package. `RoutePol
 
 Task and consultation records use separate directories. Idempotency is namespaced by mode, source, and destination. A single process lock, atomic JSON replacement, file and directory `fsync`, expiring leases, and lease fencing make state transitions durable and predictable.
 
-The MCP worker surface exposes eleven tools:
+The MCP worker surface exposes twelve tools:
 
 - `claim_task`, `complete_task`, `fail_task`, and `read_result` for formal work. `read_result` returns one promoted task's status and stored result only to the endpoint that promoted the post which created that task. Every other endpoint is refused. A task that was not promoted from a board is refused. The result text is not part of `wait_available`.
 - `claim_question` and `answer_question` for advice-only consultations.
 - `post_board`, `read_board`, `poll_unread`, `ack_board`, and `promote_board` for a graph-bound member. A board post is at most 2048 bytes. Reading and polling do not acknowledge. Own posts are not unread. `ack_board` names the posts that stop being unread. Each page has at most 20 posts. The simple pair refuses these five.
+- `ask` sends one question on subject `ask.<work>` over NATS request/reply and waits for one answer. It needs `AGENT_BUS_NATS_URL`. It does not create a board post, a task, or a consultation. A spaced work name is refused. Nobody listening returns `no_responders` at once.
 
 Each bearer-authenticated `MCPApplication` wraps one principal-bound queue object. MCP calls cannot choose or override source, worker, agent, or author identities. No tool fetches URLs, opens files, runs a shell command, or routes to another worker. A consultation or an ordinary task is still created only by the local process. `promote_board` is the one MCP call that creates a task, and only from a post that bound endpoint authored.
 
@@ -245,7 +246,7 @@ A bound local producer calls `enqueue` with a policy-allowed `destination_id`, a
 
 ### Protocol boundary
 
-The authenticated endpoint is stateless `POST /mcp` JSON-RPC. It accepts one request per POST and rejects batches. Notifications without an `id` receive HTTP 202 with an empty body. It supports `initialize`, `ping`, `tools/list`, and calls to the eleven tools above.
+The authenticated endpoint is stateless `POST /mcp` JSON-RPC. It accepts one request per POST and rejects batches. Notifications without an `id` receive HTTP 202 with an empty body. A valid bearer on `GET /mcp` receives HTTP 405 with `Allow: POST`. A missing or wrong bearer is still HTTP 401. It supports `initialize`, `ping`, `tools/list`, and calls to the twelve tools above.
 
 This is intentionally not full Streamable HTTP: there are no sessions, SSE streams, resumability, server-initiated messages, or heartbeats. One MCP application serves one bound worker principal; multiple policy agents do not turn this adapter into a federated or multi-host transport. Confirm that the selected MCP client can use this stateless POST-only contract.
 

@@ -54,9 +54,11 @@ BR-20. Accepted 2026-11-08. The endpoint that promoted a post may read that task
 
 BR-21. Accepted 2026-11-08. A direct connection between two computers may use the carrier-grade range only when the operator explicitly allows that range. That allowance adds no other range. Public addresses stay refused. This repository does not open that listener.
 
+BR-22. Accepted 2026-11-13. An optional local MCP call may ask one question over NATS request/reply. The operator supplies the server. This package does not install that server and does not start a listener. The call does not create a board post, a task, or a consultation. Nobody listening is a result, not a retry.
+
 ## Technical specification
 
-TS-10 and TS-11 specify the later accepted lines. Installer detail remains in `docs/ENDPOINTS.md`, `docs/REMOTE.md`, `docs/HERMES.md`, and `docs/MULTI_BOX.md`. Those files do not replace this section.
+TS-10, TS-11, and TS-12 specify the later accepted lines. Installer detail remains in `docs/ENDPOINTS.md`, `docs/REMOTE.md`, `docs/HERMES.md`, and `docs/MULTI_BOX.md`. Those files do not replace this section.
 
 ### Identity
 
@@ -87,6 +89,8 @@ TS-9. Cites BR-19. The turn argv is `hermes -p PROFILE chat --oneshot --query-fi
 TS-10. Cites BR-20. `read_result` is on the local MCP door and the mutual-TLS door. It returns one task's status and stored result only when the caller is the endpoint that promoted the post which created that task. Every other endpoint is refused. A task with no board promotion is refused. `wait_available` still contains no result text. On the mutual-TLS door, repeating the same request id returns the same stored read. A mismatched replay is refused.
 
 TS-11. Cites BR-21. The two-machine helper refuses `100.64.0.0/10` unless `AGENT_BUS_ALLOW_TAILSCALE` is exactly `1`. That opt-in adds no other range. Public addresses, `0.0.0.0`, and hostnames stay refused. TLS verification is unchanged. This specification does not bind that range.
+
+TS-12. Cites BR-22. `ask` is on the local MCP door only. It needs `AGENT_BUS_NATS_URL`. `work` is one token of letters, digits, and hyphens. The subject is `ask.<work>`. One queue group, `agent-bus`, takes each ask. Nobody listening returns `no_responders` at once. A silent listener returns `timeout` at the deadline. An answer returns `answered`. The call writes no board post, task, or consultation. The mutual-TLS host does not expose this tool.
 
 ### Not built
 

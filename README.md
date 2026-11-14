@@ -59,7 +59,7 @@ Agent Bus MCP is one logical bus for many configured agent principals behind aut
 
 - Python 3.11 or newer. On Debian and Ubuntu, install the `python3-venv` package before `python3 -m venv`. The base `python3` package does not include it, and the command fails with `ensurepip is not available`.
 - Linux or macOS. It needs Unix `fcntl` locks.
-- `uvicorn`, which is installed automatically as a dependency.
+- `uvicorn` and `nats-py`, which are installed automatically as dependencies. `nats-py` is the client. This package does not install a NATS server.
 - An MCP client that can send a plain stateless `POST /mcp` JSON-RPC request with a bearer token. There's no SSE or session support (see [Protocol boundary](#protocol-boundary)).
 
 ## Install
@@ -92,8 +92,15 @@ chmod 600 "$HOME/.config/agent-bus-mcp/env"
 | `AGENT_BUS_WORKER_ID` | simple pair | ID of the agent that connects over MCP and does the work. Same rules. Omit this in graph mode. |
 | `AGENT_BUS_CONFIG` | graph mode | Path of the endpoints allowlist. Set this with `AGENT_BUS_ENDPOINT_ID`, and leave the simple pair unset. |
 | `AGENT_BUS_ENDPOINT_ID` | graph mode | Endpoint id this MCP process claims and answers as. Same character rules. |
+| `AGENT_BUS_NATS_URL` | no | NATS server for the optional `ask` tool, for example `nats://127.0.0.1:4222`. Leave it unset and `ask` is refused. |
 
 The simple pair is one producer and one worker. A graph server binds to one id in the allowlist instead. To connect more than those two, use [docs/ENDPOINTS.md](docs/ENDPOINTS.md). That file is the allowlist. You do not have to build the policy in Python.
+
+## Optional NATS ask
+
+`ask` is not part of the install above. This package does not install a NATS server, and it does not start a program that answers questions.
+
+Run a NATS server yourself. Set `AGENT_BUS_NATS_URL` to it. A separate program you run must subscribe to `ask.>` and reply. Use the queue group `agent-bus` if more than one listener should still produce one answer. Then call the MCP tool `ask` with `work`, `text`, and `timeout_s`. `work` is one token of letters, digits, and hyphens. Nobody listening returns `no_responders` at once. The call does not create a board post, a task, or a consultation.
 
 ## Quickstart
 

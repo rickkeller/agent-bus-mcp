@@ -1,6 +1,6 @@
 # Connect endpoints
 
-The bus carries two kinds of message. It does not call a model, and it does not start the other program.
+The bus carries two kinds of message. It does not call a model, and it does not start the other program. `ask` is not one of these messages. It is the optional MCP tool in the README, and this command does not send it.
 
 - **chat** is one short message. It expires. It does not become work.
 - **handoff** is one public HTTPS pointer. The bus does not fetch it and does not carry the file.

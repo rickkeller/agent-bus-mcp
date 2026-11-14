@@ -8,6 +8,8 @@ Reference validation accepts only syntactic public HTTPS; it does not establish 
 
 This package is one local durable core. It is not multi-host federation, service discovery, replicated storage, or consensus. The optional TLS host encrypts its own clients and checks their certificates. It does not dial out. An operator adding an adapter must authenticate its agent principal before constructing or selecting the corresponding bound queue object.
 
+`ask` is an optional outbound NATS client. The operator sets `AGENT_BUS_NATS_URL`. This package does not listen for NATS, and the call does not create a board post, a task, or a consultation. Treat the question and the answer as untrusted text.
+
 The public-research producer and its manifest are an example workload, not the product. Its reserved `.invalid` reference must not be treated as live content.
 
 Report vulnerabilities privately through a GitHub Security Advisory. Do not place secrets, task contents, or state records in a public report.

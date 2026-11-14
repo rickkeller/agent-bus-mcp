@@ -9,6 +9,7 @@ Added:
 - `ask`, one NATS request/reply question on `ask.<work>`. It does not create a board post, a task, or a consultation. Nobody listening returns `no_responders` at once.
 - Optional `AGENT_BUS_NATS_URL`. Without it, `ask` is refused.
 - A valid bearer on `GET /mcp` returns 405 with `Allow: POST`. A missing or wrong bearer is still 401.
+- The package does not install a NATS server and does not start a listener. A stranger runs both.
 
 ## 0.2.0
 

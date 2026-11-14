@@ -11,6 +11,7 @@ src/agent_bus_mcp/
   __init__.py            exports DurableQueue, QueueRefused, RoutePolicy
   queue.py               RoutePolicy and the principal-bound DurableQueue
   mcp.py                 MCPApplication and the `agent-bus-mcp` entry point
+  ask.py                 optional NATS request/reply client; does not install a server
   remote.py              TLS host: one state directory, one enrolled certificate per endpoint
   enroll.py              local enrollment and revocation, not a remote tool
   remote_call.py         TLS client for that host
@@ -44,5 +45,5 @@ For a manual run, use a throwaway state directory such as `$(mktemp -d)`, a rand
 - Keep the boundary closed. Don't add MCP tools that create questions, chats, pointers, or ordinary tasks, and don't add tools that fetch URLs, open files, run commands, route to another worker, or call an external webhook. A graph-bound member may post, read, and poll a board. Polling does not acknowledge. `ack_board` names the exact posts. Only the author may promote that post, which creates one handoff to one other member. Remote callers never choose source, worker, author, or endpoint IDs.
 - Every state change goes through the process lock, atomic JSON replacement, and fsync. Keep lease fencing intact.
 - Refusals don't reveal details. Raise `QueueRefused` or return a generic error.
-- `uvicorn` is the only runtime dependency.
+- `uvicorn` and `nats-py` are the runtime dependencies. `nats-py` is the client. This package does not install a NATS server or start a listener.
 - Every behaviour change needs a test.

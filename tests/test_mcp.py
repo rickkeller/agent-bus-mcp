@@ -361,7 +361,7 @@ def test_graph_member_can_post_read_and_promote_without_impersonation(tmp_path: 
         (legacy, {"board": "room", "text": "no board here", "key": "z"}),
         (north, {"board": "room", "text": "   ", "key": "blank"}),
         (north, {"board": "room", "text": "x" * 2049, "key": "long"}),
-        (north, {"board": "room", "text": "restart jig", "key": "blocked"}),
+        (north, {"board": "room", "text": "restart the agent", "key": "blocked"}),
         (north, {"board": "../room", "text": "path", "key": "path"}),
     ):
         refused = _call(app, "post_board", arguments)

@@ -21,9 +21,9 @@ AGENT_BUS_ENDPOINT_ID=north agent-bus-endpoint promote-board --board room --post
 
 A graph-bound MCP server can post and read that board as its own endpoint, and the author can promote. Use the same state directory and config. Set `AGENT_BUS_ENDPOINT_ID` to the member, and leave `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID` unset. A post does not create a task. The claim of the promoted handoff includes `board` and `post_id`. The server cannot post as a different endpoint, and the simple pair has no board. The commands and the refusal rules are in `docs/ENDPOINTS.md`.
 
-## Connect jig and grokbot
+## Connect alice and bob
 
-This is one machine. Both programs share one state directory. If grokbot is on another computer, this package cannot connect them.
+This is one machine. Both endpoints share one state directory. If bob is on another computer, this package cannot connect them.
 
 You do not start the MCP server for this chat. That server cannot create a chat or a pointer.
 
@@ -32,26 +32,26 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e .
 install -d -m 700 "$HOME/.local/state/agent-bus-mcp" "$HOME/.config/agent-bus-mcp"
-cp examples/jig-grokbot.json "$HOME/.config/agent-bus-mcp/endpoints.json"
+cp examples/alice-bob.json "$HOME/.config/agent-bus-mcp/endpoints.json"
 chmod 600 "$HOME/.config/agent-bus-mcp/endpoints.json"
 export AGENT_BUS_STATE_DIR="$HOME/.local/state/agent-bus-mcp"
 export AGENT_BUS_CONFIG="$HOME/.config/agent-bus-mcp/endpoints.json"
-AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint post-chat --to jig --text "what version are you on" --key once
-AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint claim-chat
+AGENT_BUS_ENDPOINT_ID=bob agent-bus-endpoint post-chat --to alice --text "what version are you on" --key once
+AGENT_BUS_ENDPOINT_ID=alice agent-bus-endpoint claim-chat
 ```
 
 Copy `consultation_id` and `lease_id` from the claim line, then:
 
 ```sh
-AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
-AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint read-chat CONSULTATION_ID
+AGENT_BUS_ENDPOINT_ID=alice agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
+AGENT_BUS_ENDPOINT_ID=bob agent-bus-endpoint read-chat CONSULTATION_ID
 ```
 
-A pair that is not in the file is refused. Jig can file a claimed chat as an ask when its data directory has `bus.json` with `state_dir`, `config`, and `endpoint_id` set to `jig`. Jig does not reply. grokbot has no client in this package, so a person runs the command above for it.
+A pair that is not in the file is refused. This package does not start either endpoint and does not answer for it. A person runs the commands above.
 
 ## Worker door
 
-The MCP server is a later door. It can claim and answer. On a graph it can also post, read, and promote a board it belongs to. It cannot create a chat, a pointer, or a task except by that author promotion. The environment variables and the Python snippet below are for that door, not for connecting jig to grokbot.
+The MCP server is a later door. It can claim and answer. On a graph it can also post, read, and promote a board it belongs to. It cannot create a chat, a pointer, or a task except by that author promotion. The environment variables and the Python snippet below are for that door, not for connecting alice to bob.
 
 Agent Bus MCP is one logical bus for many configured agent principals behind authenticated adapters. Its local durable core stores policy-controlled, directed many-to-many pathways for quick advice and bounded jobs. A controller can give different jobs to multiple workers—virtual one-to-many assignments over shared state—without owning or monopolizing the transport.
 
@@ -192,13 +192,13 @@ An installed program does not have to use one fixed product name. Copy `examples
 Each endpoint is a local process. Set `AGENT_BUS_STATE_DIR` to one shared directory, `AGENT_BUS_CONFIG` to that file, and `AGENT_BUS_ENDPOINT_ID` to this process. A message cannot name a different sender.
 
 ```sh
-AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint post-chat --to jig --text "what version are you on" --key once
-AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint claim-chat
-AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
-AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint read-chat CONSULTATION_ID
+AGENT_BUS_ENDPOINT_ID=bob agent-bus-endpoint post-chat --to alice --text "what version are you on" --key once
+AGENT_BUS_ENDPOINT_ID=alice agent-bus-endpoint claim-chat
+AGENT_BUS_ENDPOINT_ID=alice agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
+AGENT_BUS_ENDPOINT_ID=bob agent-bus-endpoint read-chat CONSULTATION_ID
 ```
 
-A pair that is not in the file is refused. Dots to OpenClaw, OpenClaw to Hermes, and Hermes to OpenClaw are the same commands with different ids. The MCP server still cannot create a chat or a pointer. Those stay on this local command.
+A pair that is not in the file is refused. Dave to Carol, Carol to Eve, and Eve to Carol are the same commands with different ids. The MCP server still cannot create a chat or a pointer. Those stay on this local command.
 
 ### Consultation API
 

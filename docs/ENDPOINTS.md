@@ -7,7 +7,7 @@ The bus carries two kinds of message. It does not call a model, and it does not 
 
 ## Allowlist
 
-For the first pair, copy `examples/jig-grokbot.json`. It allows chat from grokbot to jig and from jig to grokbot. Copy `examples/endpoints.json` only when you want the other names. Keep the endpoint names you want and delete the rest. An edge says who may send which kind to whom. A missing edge is refused.
+For the first pair, copy `examples/alice-bob.json`. It allows chat from bob to alice and from alice to bob. Copy `examples/endpoints.json` only when you want the other names. Keep the endpoint names you want and delete the rest. An edge says who may send which kind to whom. A missing edge is refused.
 
 An endpoint id is 1–64 characters from `A-Z`, `a-z`, `0-9`, `_`, or `-`. Do not put a token, a host path, or a chat id in this file.
 
@@ -19,26 +19,26 @@ Each program uses the same state directory and the same allowlist, and its own i
 install -d -m 700 "$HOME/.local/state/agent-bus-mcp"
 export AGENT_BUS_STATE_DIR="$HOME/.local/state/agent-bus-mcp"
 export AGENT_BUS_CONFIG="$HOME/.config/agent-bus-mcp/endpoints.json"
-export AGENT_BUS_ENDPOINT_ID=jig
-agent-bus-endpoint post-chat --to grokbot --text "what version are you on" --key once
+export AGENT_BUS_ENDPOINT_ID=alice
+agent-bus-endpoint post-chat --to bob --text "what version are you on" --key once
 ```
 
 The other endpoint claims and answers with its own id:
 
 ```sh
-AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint claim-chat
-AGENT_BUS_ENDPOINT_ID=grokbot agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
-AGENT_BUS_ENDPOINT_ID=jig agent-bus-endpoint read-chat CONSULTATION_ID
+AGENT_BUS_ENDPOINT_ID=bob agent-bus-endpoint claim-chat
+AGENT_BUS_ENDPOINT_ID=bob agent-bus-endpoint answer-chat --id CONSULTATION_ID --lease LEASE_ID --text "0.1.0"
+AGENT_BUS_ENDPOINT_ID=alice agent-bus-endpoint read-chat CONSULTATION_ID
 ```
 
-A handoff is the same shape:
+A handoff is the same shape. This edge is the one in `examples/endpoints.json` from dave to carol:
 
 ```sh
-agent-bus-endpoint post-handoff --to openclaw --pointer https://example.invalid/note --key file-1
-AGENT_BUS_ENDPOINT_ID=openclaw agent-bus-endpoint claim-handoff
+AGENT_BUS_ENDPOINT_ID=dave agent-bus-endpoint post-handoff --to carol --pointer https://example.invalid/note --key file-1
+AGENT_BUS_ENDPOINT_ID=carol agent-bus-endpoint claim-handoff
 ```
 
-`dots`, `openclaw`, `hermes`, `grokbot`, and `jig` in the example are names you can keep or replace. They are not built-in programs. Each one still needs its own client, or a person runs this command for it.
+`alice`, `bob`, `carol`, `dave`, and `eve` in the example are names you can keep or replace. They are not built-in programs. Each one still needs its own client, or a person runs this command for it.
 
 ## What this is not
 
@@ -59,5 +59,3 @@ AGENT_BUS_ENDPOINT_ID=south agent-bus-endpoint claim-handoff
 ```
 
 `examples/two-endpoints.json` is that graph. `north` and `south` are not built-in programs. Replace them. Copy that file only for a local proof. It is not a network, and it does not start either program.
-
-Jig can file a claimed chat as an ask when its data directory has `bus.json`. That file is documented in the Jig setup notes.

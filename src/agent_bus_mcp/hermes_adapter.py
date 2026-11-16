@@ -16,8 +16,8 @@ or send a message. Official Hermes distinguishes three different commands:
 https://hermes-agent.nousresearch.com/docs/reference/cli-commands
 https://hermes-agent.nousresearch.com/docs/user-guide/multi-profile-gateways
 
-The query file is the operator's. A hint is not copied into it. Otto is not
-named here.
+The query file is the operator's. A hint is not copied into it. No house
+profile is named here.
 """
 
 from __future__ import annotations

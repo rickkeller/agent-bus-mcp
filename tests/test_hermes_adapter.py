@@ -1,4 +1,4 @@
-"""Synthetic Hermes adapter. No Otto process and no model call."""
+"""Synthetic Hermes adapter. No model call."""
 
 import json
 import os

@@ -8,15 +8,15 @@ Accepted 2026-10-22. Later lines record a later acceptance. They do not rewrite 
 
 ### Accepted 2026-10-22
 
-BR-1. Agent Bus is a shared communications fabric. It is not an Otto app. OpenClaw, grokbot, Dots, and any other endpoint use the same rules. Otto may be absent from a path.
+BR-1. Agent Bus is a shared communications fabric. It is not one product's app. Any configured endpoint uses the same rules. A particular product may be absent from a path.
 
 BR-2. An endpoint is created with a type. The type says which message kinds it may send, and which other endpoints it may reach. The bus enforces that allowlist. An app does not invent its own door.
 
-BR-3. A message can start from an agent. A human does not have to start it. The proof case is grokbot seeing an OpenClaw security note and asking OpenClaw what version it is on.
+BR-3. A message can start from an agent. A human does not have to start it. The proof case is one endpoint seeing another's note and asking what version it is on.
 
 BR-4. A task may be requested in either direction when both endpoint types allow that pair and that message kind. The bus does not decide the work. It decides who may send what to whom.
 
-BR-5. Direct is the default. "Must go through Core" is a setting on that pair. It is not the architecture. A required middle hop is the man in the middle this bus is not.
+BR-5. Direct is the default. Requiring one named middle endpoint is a setting on that pair. It is not the architecture. A required middle hop is the man in the middle this bus is not.
 
 BR-6. Chat and a file handoff are separate capabilities. A file handoff is a pointer to a place both sides can read, such as Drive. The bus does not carry the file bytes.
 
@@ -26,11 +26,11 @@ BR-8. Messages are addressed. There is no public bulletin board.
 
 BR-9. This is not a manned push framework. An agent may send without a person in the middle.
 
-Not this: a private tool that only one chat can call. A question that turns itself into a job. A file pasted into the message. Otto-only names as the only allowed endpoints.
+Not this: a private tool that only one chat can call. A question that turns itself into a job. A file pasted into the message. One product's names as the only allowed endpoints.
 
 ### Later accepted
 
-BR-10. Accepted 2026-11-05. The addressed endpoint owns that handoff. There is no install-wide owner. Zero allowed handoff targets, or more than one when the sender omits the destination, is a refusal. The product does not guess a hidden Core.
+BR-10. Accepted 2026-11-05. The addressed endpoint owns that handoff. There is no install-wide owner. Zero allowed handoff targets, or more than one when the sender omits the destination, is a refusal. The product does not guess a hidden middle endpoint.
 
 BR-11. Accepted 2026-11-06. A board is a named list of two or more installer-chosen endpoints. A pair is a board of two. A non-member cannot read or post. A post does not own work. This amends BR-8: a member board is allowed. A public room is not.
 
@@ -46,7 +46,7 @@ BR-16. Accepted 2026-11-07. One process owns the state directory. Another proces
 
 BR-17. Accepted 2026-11-07. A connected client may hold a call until this endpoint has something to read, claim, or resume. That hold is a hint. It does not acknowledge, claim, dial out, or start a stopped agent.
 
-BR-18. Accepted 2026-11-07. A separate local process may wait as one endpoint and start only an operator-approved Hermes gateway run. Bus text is not a prompt. Otto is not named by this repository.
+BR-18. Accepted 2026-11-07. A separate local process may wait as one endpoint and start only an operator-approved Hermes gateway run. Bus text is not a prompt. A house profile name is not stored by this repository.
 
 BR-19. Accepted 2026-11-08. That same process may instead start one documented Hermes foreground turn when the hint says a handoff can be claimed or this endpoint already holds a lease. The turn is `hermes -p PROFILE chat --oneshot --query-file PATH --source tool`. The query file is the operator's. The hint is not copied into it. Unread chat alone does not start the turn. The process still does not claim, acknowledge, or send anywhere but the bus host it was configured to call. A model finishing the handoff is not this requirement.
 
@@ -68,7 +68,7 @@ TS-1. Cites BR-2 and BR-10. An endpoint id is 1–64 characters from ASCII lette
 
 ### Local command
 
-TS-2. Cites BR-4, BR-6, and BR-9. `agent-bus-endpoint` sends one chat or one HTTPS pointer on an allowlisted edge. The sender is the process id. The bus does not carry file bytes. The command does not start the other program. `examples/two-endpoints.json` is the generic two-name graph. `examples/jig-grokbot.json` and `examples/endpoints.json` are examples, not the contract.
+TS-2. Cites BR-4, BR-6, and BR-9. `agent-bus-endpoint` sends one chat or one HTTPS pointer on an allowlisted edge. The sender is the process id. The bus does not carry file bytes. The command does not start the other program. `examples/two-endpoints.json` is the generic two-name graph. `examples/alice-bob.json` and `examples/endpoints.json` are examples, not the contract.
 
 ### Board and promote
 
@@ -84,7 +84,7 @@ TS-6. Cites BR-16. `agent-bus-remote` is the only writer of the state directory.
 
 TS-7. Cites BR-17. `wait_available` holds an already-open mutual-TLS call for 1 to 25 seconds. The result is `ready` or `timeout`. The hint lists at most 20 board names and two flags, `claimable` and `holding_lease`. It contains no post text, task id, goal, or lease id. The host keeps one parked wait per endpoint and at most 32 for the process. A second parked wait for the same endpoint is refused. Disconnect and restart acknowledge nothing.
 
-TS-8. Cites BR-18. `hermes_adapter` is not part of the host. It waits with one endpoint's certificate and, on a ready hint, starts one argv from the operator's JSON file. The gateway forms are `hermes -p PROFILE gateway run --force` and `hermes gateway run` with no profile. On Hermes v0.23.0 a named profile's `gateway run` without `--force` exits 78. The adapter refuses `chat -q`, `-z`, `gateway start`, `gateway stop`, `gateway restart`, and `--all`. The one accepted turn is TS-9. It does not append hint text, acknowledge, claim, or signal a process it did not start. A revoked certificate does not start the process. No Otto profile name is stored.
+TS-8. Cites BR-18. `hermes_adapter` is not part of the host. It waits with one endpoint's certificate and, on a ready hint, starts one argv from the operator's JSON file. The gateway forms are `hermes -p PROFILE gateway run --force` and `hermes gateway run` with no profile. On Hermes v0.23.0 a named profile's `gateway run` without `--force` exits 78. The adapter refuses `chat -q`, `-z`, `gateway start`, `gateway stop`, `gateway restart`, and `--all`. The one accepted turn is TS-9. It does not append hint text, acknowledge, claim, or signal a process it did not start. A revoked certificate does not start the process. No house profile name is stored.
 
 TS-9. Cites BR-19. The turn argv is `hermes -p PROFILE chat --oneshot --query-file PATH --source tool`, with `--profile` or `--profile=PROFILE` in place of `-p PROFILE`. `PATH` is absolute, 4096 characters or fewer, and uses only letters, digits, `/`, `.`, `_`, and `-`. The adapter starts it only when `claimable` or `holding_lease` is true. It requires the path to be a regular file and not a symlink. It does not check the file mode or decide whether the operator trusts the text, and it does not read or write that file. A ready hint that does not start a turn still waits out `backoff_seconds` before the next `wait_available`. A timeout does not add that wait. `max_turns` is 1 to 8 and defaults to 1. `turn_timeout_seconds` is 1 to 300 and defaults to 120. Those two keys are refused on a gateway argv. A non-zero exit counts toward `max_spawn_failures`. A process that is still alive is left running, and a second turn is not started in this process. A second adapter process is outside that guard. Synthetic tests of this argv are not a model acceptance.
 
@@ -100,7 +100,7 @@ TS-13. Cites BR-23. When `AGENT_BUS_NATS_URL` is set, `post_board` offers the te
 
 These business lines have no specification line that the code satisfies.
 
-- BR-3 is not done. The first proof is still two non-Otto peers, one agent starting one question, the other answering, with no person, no file, no timer, and no Core hop. A local command that a person runs is not that proof. grokbot has no client in this package.
+- BR-3 is not done. The first proof is still two peers, one agent starting one question, the other answering, with no person, no file, no timer, and no required middle hop. A local command that a person runs is not that proof. The sample endpoints have no client in this package.
 - BR-6 is only an HTTPS pointer on the local command. Drive pointers, and any pointer on the remote door, are not built.
 - BR-7 is not built. No timer is enabled from this repository. Ordinary chat is not retried. Retry-until-complete for work is not built. The remote contract is at least once, plus idempotent mutations, not exactly once.
 - BR-16's same-machine tests are not a two-computer run. The carrier-range allowance is TS-11. Failover, multi-master, a shared disk, and a callback are not built.

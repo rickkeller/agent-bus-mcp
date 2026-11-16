@@ -1,0 +1,7 @@
+{
+  "endpoints": ["alice", "bob"],
+  "allow": [
+    {"from": "bob", "to": "alice", "kinds": ["chat"]},
+    {"from": "alice", "to": "bob", "kinds": ["chat"]}
+  ]
+}

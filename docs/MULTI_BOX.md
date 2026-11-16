@@ -110,7 +110,7 @@ An endpoint id string in the allowlist remains 1–64 ASCII letters, digits, `_`
 - The host clock is synchronized enough for lease expiry. Clients do not vote on the time.
 - Disk full fails the write and leaves the previous durable record. Clients retry idempotent calls after the operator frees space.
 - Membership changes are edits to the allowlist on the host, then a refusal of any credential no longer listed.
-- No timer, no second Jig process, and no live worker cutover are started from this repository as part of adopting the design.
+- No timer, no second agent process, and no live worker cutover are started from this repository as part of adopting the design.
 - The first remote listener, when it exists, is a separate process an operator reviews. This document does not add a unit file and does not enable one.
 
 ## Alternatives

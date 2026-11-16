@@ -82,7 +82,7 @@ _BLOCKED = (
     "privilege",
     "sudo",
     "live restart",
-    "restart jig",
+    "restart the agent",
     "restart the process",
     "firequant",
     "gateway restart",

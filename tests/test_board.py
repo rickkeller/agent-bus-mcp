@@ -29,12 +29,12 @@ def _pair(tmp_path: Path) -> Path:
     return _write(
         tmp_path / "endpoints.json",
         {
-            "endpoints": ["alfred", "core", "jig", "stranger"],
+            "endpoints": ["alice", "bob", "carol", "stranger"],
             "allow": [
-                {"from": "alfred", "to": "core", "kinds": ["chat", "handoff"]},
-                {"from": "core", "to": "alfred", "kinds": ["chat"]},
+                {"from": "alice", "to": "bob", "kinds": ["chat", "handoff"]},
+                {"from": "bob", "to": "alice", "kinds": ["chat"]},
             ],
-            "boards": [{"id": "pair", "members": ["alfred", "core"]}],
+            "boards": [{"id": "pair", "members": ["alice", "bob"]}],
         },
     )
 
@@ -42,10 +42,10 @@ def _pair(tmp_path: Path) -> Path:
 def test_pair_talk_does_not_own_work(tmp_path: Path) -> None:
     config = _pair(tmp_path)
     state = tmp_path / "state"
-    alfred = open_endpoint(state, config, "alfred")
-    core = open_endpoint(state, config, "core")
-    posted = post_board(alfred, config=config, board="pair", text="what should own this", key="once")
-    read = read_board(core, config=config, board="pair")
+    alice = open_endpoint(state, config, "alice")
+    bob = open_endpoint(state, config, "bob")
+    posted = post_board(alice, config=config, board="pair", text="what should own this", key="once")
+    read = read_board(bob, config=config, board="pair")
     assert read[0]["post_id"] == posted["post_id"]
     assert read[0]["text"] == "what should own this"
     assert read[0]["handoff_id"] is None
@@ -53,88 +53,88 @@ def test_pair_talk_does_not_own_work(tmp_path: Path) -> None:
     with pytest.raises(QueueRefused):
         read_board(open_endpoint(state, config, "stranger"), config=config, board="pair")
     with pytest.raises(QueueRefused):
-        post_board(open_endpoint(state, config, "jig"), config=config, board="pair", text="no", key="no")
+        post_board(open_endpoint(state, config, "carol"), config=config, board="pair", text="no", key="no")
 
 
 def test_promote_names_the_owner_and_links_both_ways(tmp_path: Path) -> None:
     config = _pair(tmp_path)
     state = tmp_path / "state"
-    alfred = open_endpoint(state, config, "alfred")
-    posted = post_board(alfred, config=config, board="pair", text="core owns the fix", key="talk")
-    task_id = promote_board(alfred, config=config, board="pair", post_id=posted["post_id"], key="own")
-    assert promote_board(alfred, config=config, board="pair", post_id=posted["post_id"], key="own") == task_id
+    alice = open_endpoint(state, config, "alice")
+    posted = post_board(alice, config=config, board="pair", text="bob owns the fix", key="talk")
+    task_id = promote_board(alice, config=config, board="pair", post_id=posted["post_id"], key="own")
+    assert promote_board(alice, config=config, board="pair", post_id=posted["post_id"], key="own") == task_id
     with pytest.raises(QueueRefused):
-        promote_board(alfred, config=config, board="pair", post_id=posted["post_id"], key="again")
-    claimed = open_endpoint(state, config, "core").claim()
+        promote_board(alice, config=config, board="pair", post_id=posted["post_id"], key="again")
+    claimed = open_endpoint(state, config, "bob").claim()
     assert claimed is not None
     assert claimed["task_id"] == task_id
     assert posted["post_id"] in claimed["goal"]
-    assert open_endpoint(state, config, "alfred").claim() is None
-    assert read_board(alfred, config=config, board="pair")[0]["handoff_id"] == task_id
+    assert open_endpoint(state, config, "alice").claim() is None
+    assert read_board(alice, config=config, board="pair")[0]["handoff_id"] == task_id
     link = json.loads((state / "promotions" / f"{task_id}.json").read_text(encoding="utf-8"))
-    assert link == {"board": "pair", "post_id": posted["post_id"], "to": "core"}
+    assert link == {"board": "pair", "post_id": posted["post_id"], "to": "bob"}
 
 
 def test_only_the_promoting_endpoint_reads_a_result(tmp_path: Path) -> None:
     config = _pair(tmp_path)
     state = tmp_path / "state"
-    alfred = open_endpoint(state, config, "alfred")
-    core = open_endpoint(state, config, "core")
-    posted = post_board(alfred, config=config, board="pair", text="core owns this", key="once")
-    task_id = promote_board(alfred, config=config, board="pair", post_id=posted["post_id"], key="own")
-    assert alfred.read_result(task_id) == {"task_id": task_id, "status": "pending", "result": None}
-    claimed = core.claim()
+    alice = open_endpoint(state, config, "alice")
+    bob = open_endpoint(state, config, "bob")
+    posted = post_board(alice, config=config, board="pair", text="bob owns this", key="once")
+    task_id = promote_board(alice, config=config, board="pair", post_id=posted["post_id"], key="own")
+    assert alice.read_result(task_id) == {"task_id": task_id, "status": "pending", "result": None}
+    claimed = bob.claim()
     assert claimed is not None
     assert claimed["task_id"] == task_id
-    core.finish(task_id=task_id, lease_id=claimed["lease_id"], result="the fix is in", failed=False)
-    assert alfred.read_result(task_id) == {"task_id": task_id, "status": "completed", "result": "the fix is in"}
+    bob.finish(task_id=task_id, lease_id=claimed["lease_id"], result="the fix is in", failed=False)
+    assert alice.read_result(task_id) == {"task_id": task_id, "status": "completed", "result": "the fix is in"}
     with pytest.raises(QueueRefused):
-        core.read_result(task_id)
+        bob.read_result(task_id)
     with pytest.raises(QueueRefused):
-        open_endpoint(state, config, "jig").read_result(task_id)
+        open_endpoint(state, config, "carol").read_result(task_id)
     with pytest.raises(QueueRefused):
         open_endpoint(state, config, "stranger").read_result(task_id)
     with pytest.raises(QueueRefused):
-        alfred.read_result("task_" + "0" * 32)
-    failed_post = post_board(alfred, config=config, board="pair", text="core owns this too", key="twice")
-    failed_task = promote_board(alfred, config=config, board="pair", post_id=failed_post["post_id"], key="own2")
-    claimed_failed = core.claim()
+        alice.read_result("task_" + "0" * 32)
+    failed_post = post_board(alice, config=config, board="pair", text="bob owns this too", key="twice")
+    failed_task = promote_board(alice, config=config, board="pair", post_id=failed_post["post_id"], key="own2")
+    claimed_failed = bob.claim()
     assert claimed_failed is not None
     assert claimed_failed["task_id"] == failed_task
-    core.finish(task_id=failed_task, lease_id=claimed_failed["lease_id"], result=None, failed=True)
-    assert alfred.read_result(failed_task) == {"task_id": failed_task, "status": "failed", "result": None}
-    ordinary = alfred.enqueue(goal="plain work", references=[], idempotency_key="plain")
-    claimed_plain = core.claim()
+    bob.finish(task_id=failed_task, lease_id=claimed_failed["lease_id"], result=None, failed=True)
+    assert alice.read_result(failed_task) == {"task_id": failed_task, "status": "failed", "result": None}
+    ordinary = alice.enqueue(goal="plain work", references=[], idempotency_key="plain")
+    claimed_plain = bob.claim()
     assert claimed_plain is not None
     assert claimed_plain["task_id"] == ordinary
-    core.finish(task_id=ordinary, lease_id=claimed_plain["lease_id"], result="plain done", failed=False)
+    bob.finish(task_id=ordinary, lease_id=claimed_plain["lease_id"], result="plain done", failed=False)
     with pytest.raises(QueueRefused):
-        alfred.read_result(ordinary)
+        alice.read_result(ordinary)
 
 
 def test_a_missing_or_second_owner_is_refused(tmp_path: Path) -> None:
     config = _write(
         tmp_path / "endpoints.json",
         {
-            "endpoints": ["alfred", "core", "jig"],
+            "endpoints": ["alice", "bob", "carol"],
             "allow": [
-                {"from": "alfred", "to": "core", "kinds": ["handoff"]},
-                {"from": "alfred", "to": "jig", "kinds": ["handoff"]},
+                {"from": "alice", "to": "bob", "kinds": ["handoff"]},
+                {"from": "alice", "to": "carol", "kinds": ["handoff"]},
             ],
-            "boards": [{"id": "room", "members": ["alfred", "core", "jig"]}],
+            "boards": [{"id": "room", "members": ["alice", "bob", "carol"]}],
         },
     )
     state = tmp_path / "state"
-    alfred = open_endpoint(state, config, "alfred")
-    posted = post_board(alfred, config=config, board="room", text="who owns it", key="talk")
+    alice = open_endpoint(state, config, "alice")
+    posted = post_board(alice, config=config, board="room", text="who owns it", key="talk")
     with pytest.raises(QueueRefused):
-        promote_board(alfred, config=config, board="room", post_id=posted["post_id"], key="own")
+        promote_board(alice, config=config, board="room", post_id=posted["post_id"], key="own")
     named = promote_board(
-        alfred, config=config, board="room", post_id=posted["post_id"], key="own", to="core"
+        alice, config=config, board="room", post_id=posted["post_id"], key="own", to="bob"
     )
-    assert open_endpoint(state, config, "core").claim()["task_id"] == named
-    assert open_endpoint(state, config, "jig").claim() is None
-    assert read_board(open_endpoint(state, config, "jig"), config=config, board="room")[0]["text"] == "who owns it"
+    assert open_endpoint(state, config, "bob").claim()["task_id"] == named
+    assert open_endpoint(state, config, "carol").claim() is None
+    assert read_board(open_endpoint(state, config, "carol"), config=config, board="room")[0]["text"] == "who owns it"
 
 
 def test_a_board_needs_two_known_members() -> None:
@@ -142,27 +142,27 @@ def test_a_board_needs_two_known_members() -> None:
 
     with pytest.raises(QueueRefused):
         boards_from_config(
-            {"endpoints": ["alfred"], "boards": [{"id": "pair", "members": ["alfred"]}]},
+            {"endpoints": ["alice"], "boards": [{"id": "pair", "members": ["alice"]}]},
         )
     with pytest.raises(QueueRefused):
         boards_from_config(
             {
-                "endpoints": ["alfred", "core"],
-                "boards": [{"id": "pair", "members": ["alfred", "missing"]}],
+                "endpoints": ["alice", "bob"],
+                "boards": [{"id": "pair", "members": ["alice", "missing"]}],
             },
         )
 
 
-def test_cli_promotes_the_alfred_core_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_promotes_the_alice_bob_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     config = _pair(tmp_path)
     monkeypatch.setenv("AGENT_BUS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("AGENT_BUS_CONFIG", str(config))
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "alfred")
-    assert main(["post-board", "--board", "pair", "--text", "core owns the fix", "--key", "talk"]) == 0
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "alice")
+    assert main(["post-board", "--board", "pair", "--text", "bob owns the fix", "--key", "talk"]) == 0
     posted = json.loads(capsys.readouterr().out)
     assert main(["promote-board", "--board", "pair", "--post", posted["post_id"], "--key", "own"]) == 0
     task_id = json.loads(capsys.readouterr().out)
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "core")
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "bob")
     assert main(["read-board", "--board", "pair"]) == 0
     assert json.loads(capsys.readouterr().out)[0]["handoff_id"] == task_id
     assert main(["claim-handoff"]) == 0

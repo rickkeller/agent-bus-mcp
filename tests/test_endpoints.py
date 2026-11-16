@@ -13,12 +13,12 @@ def _config(tmp_path: Path) -> Path:
     path.write_text(
         json.dumps(
             {
-                "endpoints": ["jig", "grokbot", "openclaw", "hermes", "dots"],
+                "endpoints": ["alice", "bob", "carol", "eve", "dave"],
                 "allow": [
-                    {"from": "grokbot", "to": "jig", "kinds": ["chat"]},
-                    {"from": "jig", "to": "grokbot", "kinds": ["chat", "handoff"]},
-                    {"from": "dots", "to": "openclaw", "kinds": ["chat"]},
-                    {"from": "openclaw", "to": "hermes", "kinds": ["handoff"]},
+                    {"from": "bob", "to": "alice", "kinds": ["chat"]},
+                    {"from": "alice", "to": "bob", "kinds": ["chat", "handoff"]},
+                    {"from": "dave", "to": "carol", "kinds": ["chat"]},
+                    {"from": "carol", "to": "eve", "kinds": ["handoff"]},
                 ],
             }
         ),
@@ -31,15 +31,15 @@ def test_config_refuses_unknown_kind_and_self_edge() -> None:
     with pytest.raises(QueueRefused):
         policy_from_config(
             {
-                "endpoints": ["jig", "grokbot"],
-                "allow": [{"from": "jig", "to": "jig", "kinds": ["chat"]}],
+                "endpoints": ["alice", "bob"],
+                "allow": [{"from": "alice", "to": "alice", "kinds": ["chat"]}],
             }
         )
     with pytest.raises(QueueRefused):
         policy_from_config(
             {
-                "endpoints": ["jig", "grokbot"],
-                "allow": [{"from": "jig", "to": "grokbot", "kinds": ["job"]}],
+                "endpoints": ["alice", "bob"],
+                "allow": [{"from": "alice", "to": "bob", "kinds": ["job"]}],
             }
         )
 
@@ -47,9 +47,9 @@ def test_config_refuses_unknown_kind_and_self_edge() -> None:
 def test_two_endpoints_chat_without_becoming_a_task(tmp_path: Path) -> None:
     config = _config(tmp_path)
     state = tmp_path / "state"
-    sender = open_endpoint(state, config, "grokbot")
-    receiver = open_endpoint(state, config, "jig")
-    sent = post_chat(sender, to="jig", text="what version are you on", key="once")
+    sender = open_endpoint(state, config, "bob")
+    receiver = open_endpoint(state, config, "alice")
+    sent = post_chat(sender, to="alice", text="what version are you on", key="once")
     claimed = receiver.claim_question()
     assert claimed is not None
     assert claimed["question"] == "what version are you on"
@@ -61,39 +61,39 @@ def test_two_endpoints_chat_without_becoming_a_task(tmp_path: Path) -> None:
     assert sender.read_answer(sent["consultation_id"])["answer"] == "0.1.0"
     assert list((state / "tasks").glob("task_*.json")) == []
     with pytest.raises(QueueRefused):
-        post_chat(open_endpoint(state, config, "dots"), to="jig", text="no", key="no")
+        post_chat(open_endpoint(state, config, "dave"), to="alice", text="no", key="no")
 
 
 def test_handoff_is_a_pointer_not_file_bytes(tmp_path: Path) -> None:
     config = _config(tmp_path)
     state = tmp_path / "state"
-    sender = open_endpoint(state, config, "jig")
+    sender = open_endpoint(state, config, "alice")
     pointer = "https://example.invalid/note"
-    task_id = post_handoff(sender, to="grokbot", pointer=pointer, key="file-1")
-    claimed = open_endpoint(state, config, "grokbot").claim()
+    task_id = post_handoff(sender, to="bob", pointer=pointer, key="file-1")
+    claimed = open_endpoint(state, config, "bob").claim()
     assert claimed is not None
     assert claimed["task_id"] == task_id
     assert claimed["references"] == [pointer]
     with pytest.raises(QueueRefused):
-        post_handoff(sender, to="grokbot", pointer="file:///tmp/note", key="file-2")
+        post_handoff(sender, to="bob", pointer="file:///tmp/note", key="file-2")
 
 
-def test_jig_grokbot_example_is_the_first_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    example = Path(__file__).parents[1] / "examples" / "jig-grokbot.json"
+def test_alice_bob_example_is_the_first_pair(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    example = Path(__file__).parents[1] / "examples" / "alice-bob.json"
     config = tmp_path / "endpoints.json"
     config.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setenv("AGENT_BUS_STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("AGENT_BUS_CONFIG", str(config))
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "grokbot")
-    assert main(["post-chat", "--to", "jig", "--text", "what version are you on", "--key", "once"]) == 0
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "bob")
+    assert main(["post-chat", "--to", "alice", "--text", "what version are you on", "--key", "once"]) == 0
     sent = json.loads(capsys.readouterr().out)
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "jig")
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "alice")
     assert main(["claim-chat"]) == 0
     claimed = json.loads(capsys.readouterr().out)
     assert claimed["question"] == "what version are you on"
     assert main(["answer-chat", "--id", claimed["consultation_id"], "--lease", claimed["lease_id"], "--text", "0.1.0"]) == 0
     capsys.readouterr()
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "grokbot")
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "bob")
     assert main(["read-chat", sent["consultation_id"]]) == 0
     assert json.loads(capsys.readouterr().out)["answer"] == "0.1.0"
 
@@ -103,18 +103,18 @@ def test_cli_uses_the_process_endpoint(tmp_path: Path, monkeypatch: pytest.Monke
     state = tmp_path / "state"
     monkeypatch.setenv("AGENT_BUS_STATE_DIR", str(state))
     monkeypatch.setenv("AGENT_BUS_CONFIG", str(config))
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "grokbot")
-    assert main(["post-chat", "--to", "jig", "--text", "hello", "--key", "cli-1"]) == 0
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "bob")
+    assert main(["post-chat", "--to", "alice", "--text", "hello", "--key", "cli-1"]) == 0
     sent = json.loads(capsys.readouterr().out)
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "jig")
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "alice")
     assert main(["claim-chat"]) == 0
     claimed = json.loads(capsys.readouterr().out)
     assert main(["answer-chat", "--id", claimed["consultation_id"], "--lease", claimed["lease_id"], "--text", "hi"]) == 0
     capsys.readouterr()
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "grokbot")
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "bob")
     assert main(["read-chat", sent["consultation_id"]]) == 0
     assert json.loads(capsys.readouterr().out)["answer"] == "hi"
-    assert main(["post-chat", "--to", "dots", "--text", "no", "--key", "cli-2"]) == 2
+    assert main(["post-chat", "--to", "dave", "--text", "no", "--key", "cli-2"]) == 2
 
 
 def test_file_accepted_is_work_and_blocks_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -122,33 +122,33 @@ def test_file_accepted_is_work_and_blocks_the_gates(tmp_path: Path, monkeypatch:
     config.write_text(
         json.dumps(
             {
-                "endpoints": ["core", "jig"],
-                "allow": [{"from": "core", "to": "jig", "kinds": ["handoff"]}],
+                "endpoints": ["alice", "bob"],
+                "allow": [{"from": "alice", "to": "bob", "kinds": ["handoff"]}],
             }
         ),
         encoding="utf-8",
     )
     state = tmp_path / "state"
-    core = open_endpoint(state, config, "core")
+    alice = open_endpoint(state, config, "alice")
     from agent_bus_mcp.endpoints import file_accepted, read_accepted
 
-    first = file_accepted(core, to="jig", text="develop the intake", caller_id="core", key="once")
-    assert file_accepted(core, to="jig", text="develop the intake", caller_id="core", key="once") == first
-    assert file_accepted(core, to="jig", text="update the secretary note", caller_id="core", key="note") != first
+    first = file_accepted(alice, to="bob", text="develop the intake", caller_id="alice", key="once")
+    assert file_accepted(alice, to="bob", text="develop the intake", caller_id="alice", key="once") == first
+    assert file_accepted(alice, to="bob", text="update the secretary note", caller_id="alice", key="note") != first
     assert list((state / "consultations").glob("consultation_*.json")) == []
     with pytest.raises(QueueRefused):
-        file_accepted(core, to="jig", text="restart the gateway", caller_id="core", key="blocked")
+        file_accepted(alice, to="bob", text="restart the gateway", caller_id="alice", key="blocked")
     with pytest.raises(QueueRefused):
-        file_accepted(core, to="jig", text="do not spend on this", caller_id="core", key="spend")
+        file_accepted(alice, to="bob", text="do not spend on this", caller_id="alice", key="spend")
     with pytest.raises(QueueRefused):
-        file_accepted(core, to="jig", text="develop the intake", caller_id="jig", key="spoof")
+        file_accepted(alice, to="bob", text="develop the intake", caller_id="bob", key="spoof")
     monkeypatch.setenv("AGENT_BUS_STATE_DIR", str(state))
     monkeypatch.setenv("AGENT_BUS_CONFIG", str(config))
-    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "core")
-    assert main(["read-accepted", "--to", "jig", "--key", "once"]) == 0
+    monkeypatch.setenv("AGENT_BUS_ENDPOINT_ID", "alice")
+    assert main(["read-accepted", "--to", "bob", "--key", "once"]) == 0
     read = json.loads(capsys.readouterr().out)
     assert read["task_id"] == first
     assert read["status"] == "pending"
     assert read["result"] is None
     assert "develop the intake" not in capsys.readouterr().out
-    assert read_accepted(core, to="jig", key="once")["status"] == "pending"
+    assert read_accepted(alice, to="bob", key="once")["status"] == "pending"

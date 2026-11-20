@@ -21,7 +21,7 @@ There is no automatic migration command. Do not delete the old directory as part
 ## What stays
 
 - Python 3.11 or newer, and the `python3-venv` package on Debian and Ubuntu.
-- Runtime dependency remains `uvicorn`.
+- Runtime dependencies are `uvicorn` and `nats-py`. `nats-py` is the client. This package does not install a NATS server, and a normal board install leaves `AGENT_BUS_NATS_URL` unset. `ask` is refused until that variable is set. A board post is still written as a file.
 - The loopback MCP server still requires `AGENT_BUS_STATE_DIR`, `AGENT_BUS_BEARER_SECRET`, and `AGENT_BUS_PORT`.
 - `AGENT_BUS_BIND_HOST` still accepts only `loopback`.
 - The simple pair still uses `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID`.
@@ -30,7 +30,7 @@ There is no automatic migration command. Do not delete the old directory as part
 
 ## What changes
 
-- `tools/list` grows from five tools to eleven when the server is in graph mode. The simple pair still exposes the board tools in the list and refuses to run them. Clients that assume the list length is five need to tolerate the added names.
+- In 0.2.0, `tools/list` grew from five names to eleven. The simple pair still lists the board tools and refuses to run them. 0.3.0 added `ask`, so a current server lists twelve names in both modes. Clients that assume five names, or eleven, need to tolerate twelve. The check further down that saw eleven names was run against 0.2.0.
 - A promoted task's claim can include `board` and `post_id`. An ordinary task from the simple pair does not.
 - Graph mode sets `AGENT_BUS_CONFIG` and `AGENT_BUS_ENDPOINT_ID` and leaves the simple-pair ids unset. Setting both modes at once is refused.
 - New state appears only when those features are used: board files, enrollment, and remote call records. A 0.1.0 process was not tested against a directory a 0.2.0 process has written.
@@ -48,4 +48,4 @@ Generate certificates for a test when that test needs them. Keep each private ke
 
 ## Not proven
 
-A 0.1.0-shaped client was run against a fresh 0.2.0 simple-pair server on loopback. `claim_task`, `complete_task`, `claim_question`, and `answer_question` used the old arguments and succeeded. The ordinary claim did not include `board` or `post_id`. `tools/list` returned eleven names, not five. After that server stopped, a 0.1.0 process opened the same directory and read the completed result and the answer. That was not a pre-existing 0.1.0 directory, not graph mode, and not the TLS door. A two-computer deployment was not rerun. A model was not called. A person who is not the author has not been shown to onboard from these docs alone.
+A 0.1.0-shaped client was run against a fresh 0.2.0 simple-pair server on loopback. `claim_task`, `complete_task`, `claim_question`, and `answer_question` used the old arguments and succeeded. The ordinary claim did not include `board` or `post_id`. `tools/list` returned eleven names, not five. That eleven is the 0.2.0 list. A current server returns twelve, because `ask` was added in 0.3.0. After that server stopped, a 0.1.0 process opened the same directory and read the completed result and the answer. That was not a pre-existing 0.1.0 directory, not graph mode, and not the TLS door. A two-computer deployment was not rerun. A model was not called. A person who is not the author has not been shown to onboard from these docs alone.

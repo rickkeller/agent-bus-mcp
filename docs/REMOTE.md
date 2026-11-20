@@ -1,5 +1,7 @@
 # Remote host
 
+A one-machine install uses the README section Start here and does not need this host. NATS is optional. Hermes is optional.
+
 One process on one machine owns the state directory. Other processes, including a later process on another computer, call it over TLS. They do not mount the directory.
 
 This repository's tests run the host and the clients as separate processes on one virtual machine. That is not a two-physical-machine proof.

@@ -2,6 +2,8 @@
 
 Status: the first slice is a TLS host on one machine. Failover, multi-master replication, shared disks, and callbacks are still not implemented. A same-VM process test is not a two-machine proof.
 
+A fresh install on one machine does not need this page. Use the README section Start here. NATS is optional. Hermes is optional. The host that was built is `agent-bus-remote`, documented in `docs/REMOTE.md`. It maps a client certificate fingerprint to one endpoint in `enrollment.json`. It does not add a public key to the allowlist JSON. Where a paragraph below still says "public key in the allowlist", that is the earlier design sketch. Follow `docs/REMOTE.md` for the host you can run.
+
 ## First slice choices
 
 The open choices in this design are closed for the first slice as follows.
@@ -73,7 +75,7 @@ On reconnect the client polls with `after` omitted. The oldest unacknowledged po
 
 Board order is the primary's sequence. Task order is not a global stream. Each handoff has one destination member. Reconnect resumes that member's lease instead of claiming the same task again for someone else.
 
-A connected client can hold `wait_available` instead of sleeping between polls. The result is a level-triggered hint: board names, whether this endpoint can claim, and whether it already holds a lease. It does not acknowledge. A client that is not running gets nothing, because the host does not dial out, store a callback, or start that process. Starting a stopped agent or a sleeping computer is a runtime adapter outside this repository. The adapter only decides whether its own endpoint process is running; once that process is up, it is the client above. This repository still does not enable a timer, a webhook, or a vendor push.
+A connected client can hold `wait_available` instead of sleeping between polls. The result is a level-triggered hint: board names, whether this endpoint can claim, and whether it already holds a lease. It does not acknowledge. A client that is not running gets nothing, because the host does not dial out, store a callback, or start that process. The only starter in this package is `agent-bus-hermes-adapt`. It is optional, and it starts only the `hermes` binary. It does not start any other agent. A level-triggered hint means the call stays ready while the unread post or the lease is still there. This repository does not enable a timer, a webhook, or a vendor push.
 
 ## Threat model
 
@@ -110,7 +112,7 @@ An endpoint id string in the allowlist remains 1–64 ASCII letters, digits, `_`
 - The host clock is synchronized enough for lease expiry. Clients do not vote on the time.
 - Disk full fails the write and leaves the previous durable record. Clients retry idempotent calls after the operator frees space.
 - Membership changes are edits to the allowlist on the host, then a refusal of any credential no longer listed.
-- No timer, no second agent process, and no live worker cutover are started from this repository as part of adopting the design.
+- Adopting this design does not start a timer, a second writer, or a worker cutover. The optional Hermes starter is a separate program. It is not part of this design, and it starts only the `hermes` binary.
 - The first remote listener, when it exists, is a separate process an operator reviews. This document does not add a unit file and does not enable one.
 
 ## Alternatives

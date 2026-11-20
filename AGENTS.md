@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This package is a local durable bus. A worker may claim, answer, complete, or fail. A graph-bound member may post and read a board, and the author may promote one post into one handoff. A board exists only when the config has a `boards` entry with an id and at least two members. Installing does not create that entry. The folder `boards/<id>/posts/` appears when a post is first written.
+This package is a local durable bus. A worker may claim, answer, complete, or fail. Graph mode is one endpoint id plus the JSON allowlist (`AGENT_BUS_CONFIG` and `AGENT_BUS_ENDPOINT_ID`). A member in that mode may post and read a board, and the author may promote one post into one handoff. The simple pair is `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID`. It has no board. NATS and Hermes are optional. A board exists only when the config has a `boards` entry with an id and at least two members. Installing does not create that entry. The folder `boards/<id>/posts/` appears when a post is first written.
 
 With `AGENT_BUS_NATS_URL` unset, that write does not notify the other member. They see the post by reading or by `poll_unread`, then `ack_board`. When the variable is set, the post is one request on `board.<board>` and one reply, not a broadcast. An answer leaves no post file. Nobody listening writes the file. Only promotion publishes `task.<destination>`. The README sections Start here and How the other side sees a post spell this out. `examples/board_listener.py` is an example listener, not a package command.
 

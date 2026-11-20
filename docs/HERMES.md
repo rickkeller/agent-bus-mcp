@@ -1,6 +1,12 @@
 # Hermes process adapter
 
-This is an opt-in local process for one runtime. It is not part of the bus host, and it is not the only way an endpoint can use the bus. The host still does not dial out, and it still does not start an agent. No product name is required.
+The board does not require this file. `post_board`, `read_board`, `poll_unread`, and `ack_board` are MCP tools. Any agent that can call this server can use them. OpenClaw is one example of another agent. This package has not been tested with OpenClaw.
+
+This file is one optional runtime. `agent-bus-hermes-adapt` is the only program in this package that starts another process. It starts the `hermes` binary, and only the commands below. Any other program name is refused. Nothing here starts a non-Hermes agent.
+
+Another agent notices work on its own. Run a listener such as `examples/board_listener.py`, hold `wait_available` from a process you keep running, or call `poll_unread` on a timer you run. The listener example prints a NATS request and replies. It does not launch an agent. `wait_available` returns a hint and does not start a program. This package does not run the timer. The same note is in the README section Any agent can use the board.
+
+This adapter is not part of the bus host. The host does not dial out, and the host does not start an agent.
 
 The adapter is the process that stays running. It calls `wait_available` with this endpoint's client certificate while the Hermes process it started is stopped. A hint does not acknowledge or claim. Board names and task text are not a command, and they are not copied into a prompt. When the operator's argv is a gateway, any ready hint starts that process. When the argv is a turn, only a claimable handoff or a lease this endpoint already holds starts it. Unread chat alone does not. The adapter then stops waiting, so it does not hold this endpoint's wait slot at the same time as that process. When a gateway exits, the adapter waits again. A turn is one foreground process that exits; the default is one turn, then the adapter exits too.
 

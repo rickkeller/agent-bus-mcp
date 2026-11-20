@@ -130,7 +130,7 @@ The URL must be `https`. Repeat the same `--request-id` and the same arguments t
 
 ## Connected wait
 
-`wait_available` holds an already-open mutual-TLS call until this certificate's endpoint has something to read, claim, or resume, or until the deadline. It is a hint for a running client. It does not start a stopped agent, wake a sleeping computer, dial out, or accept a callback URL. A separate local process can wait with this certificate and start either an operator-approved Hermes `gateway run` or one documented `chat --oneshot --query-file` turn. See `docs/HERMES.md`. That file does not name a profile. The turn does not copy this hint into the query file.
+`wait_available` holds an already-open mutual-TLS call until this certificate's endpoint has something to read, claim, or resume, or until the deadline. It is a hint for a running client. It does not start a stopped agent, wake a sleeping computer, dial out, or accept a callback URL. One optional local process can wait with this certificate and start the `hermes` binary: either an operator-approved `gateway run` or one documented `chat --oneshot --query-file` turn. See `docs/HERMES.md`. That starter refuses any other program. Another agent, for example OpenClaw, calls the board tools itself. This package does not start it, and it has not been tested with OpenClaw. See the README section Any agent can use the board. The Hermes file does not name a profile. The turn does not copy this hint into the query file.
 
 ```sh
 agent-bus-remote-call --tool wait_available --request-id WAIT-1 --wait-seconds 25
@@ -158,4 +158,4 @@ A same-machine test is not a two-computer proof. This checklist does not start a
 5. Confirm the state directory is not mounted on the client.
 6. Do not point a live worker at this host until that test is reviewed.
 
-Failover and a second writer on another disk are not part of this slice. `wait_available` notifies a connected client. It does not start a Hermes process. `docs/HERMES.md` describes the separate local adapter. A gateway argv starts `hermes -p PROFILE gateway run`. That process staying up is not a model execution. A turn argv starts one `chat --oneshot` from an operator query file when the hint is a handoff. Neither form is the host. The Hermes adapter is one optional runtime, not the only endpoint.
+Failover and a second writer on another disk are not part of this slice. `wait_available` notifies a connected client. It does not start a process. `docs/HERMES.md` describes the separate local adapter, which starts only the `hermes` binary. A gateway argv starts `hermes -p PROFILE gateway run`. That process staying up is not a model execution. A turn argv starts one `chat --oneshot` from an operator query file when the hint is a handoff. Neither form is the host. The Hermes adapter is one optional runtime. Any agent that can call the MCP tools can post, read, poll, and ack. See the README section Any agent can use the board.

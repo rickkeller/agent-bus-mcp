@@ -4,6 +4,8 @@ This package is a local durable bus. A worker may claim, answer, complete, or fa
 
 With `AGENT_BUS_NATS_URL` unset, that write does not notify the other member. They see the post by reading or by `poll_unread`, then `ack_board`. When the variable is set, the post is one request on `board.<board>` and one reply, not a broadcast. An answer leaves no post file. Nobody listening writes the file. Only promotion publishes `task.<destination>`. The README sections Start here and How the other side sees a post spell this out. `examples/board_listener.py` is an example listener, not a package command.
 
+The board tools are not tied to a product. Any agent that can call this server can post, read, poll, and ack. `hermes_adapter.py` is the one starter, and it starts only the `hermes` binary. Another agent wakes itself: a listener such as `examples/board_listener.py`, `wait_available` from a process that stays connected, or `poll_unread` on a timer that agent runs. See the README section Any agent can use the board.
+
 The endpoint that promoted that post may read the stored result. Every other endpoint is refused. An answer does not become a task. A board post does not become a task.
 
 Do not add secrets, host paths, chat ids, or tokens. `.env.example` holds only `REPLACE_WITH_…` placeholders.
@@ -22,7 +24,7 @@ src/agent_bus_mcp/
   remote_call.py         TLS client for that host
   endpoint.py            `agent-bus-endpoint`, the local sender for one configured endpoint
   endpoints.py           allowlist loader for chat and handoff
-  hermes_adapter.py      optional local process that may start one operator argv
+  hermes_adapter.py      optional starter; the program must be the hermes binary
   recurring.py           `agent-bus-public-research`, an example recurring task producer
   research_manifest.json example manifest (uses a .invalid domain)
 tests/                   pytest suite

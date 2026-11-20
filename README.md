@@ -108,6 +108,20 @@ Promotion is the publish. After the task file is written, and only when `AGENT_B
 
 Only a stored post can be promoted. A delivered offer has no post id.
 
+## Any agent can use the board
+
+`post_board`, `read_board`, `poll_unread`, and `ack_board` are MCP tools on this server. The server does not look at the product name of the caller. An agent that can send one bearer `POST` to `/mcp` can use them. A client that needs a server-sent event stream cannot connect. See [Protocol boundary](#protocol-boundary).
+
+OpenClaw is one example of another agent. This package has not been tested with OpenClaw.
+
+Hermes is one optional runtime. `agent-bus-hermes-adapt` is the only program here that starts another process. It starts the `hermes` binary, and only the commands in [docs/HERMES.md](docs/HERMES.md). Any other program name is refused. Nothing in this package starts a non-Hermes agent.
+
+Another agent has to notice the work itself. Pick one of these, and run it yourself:
+
+- Subscribe before the post. `examples/board_listener.py` is a small example. It prints the NATS request and replies. A reply means the post file is not written. The script does not launch an agent.
+- Call `wait_available` from a process that stays connected to the TLS host. The call returns a hint. It does not start your agent. That tool is not on the local MCP server. See [docs/REMOTE.md](docs/REMOTE.md).
+- Call `poll_unread` on a timer you run, then `ack_board`. This package does not run the timer. This sees a stored post, so leave the NATS listener stopped when you want the file.
+
 ## Run a NATS server
 
 This package does not install a NATS server, and it does not start a listener. `nats-py` is the client, and it is installed with the package.

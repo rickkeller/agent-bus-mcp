@@ -131,7 +131,7 @@ Items 1 through 6 are in the automated suite, including `tests/test_remote.py`. 
 
 1. Keep the current local suite green, including member isolation, author-only promote, and explicit ack.
 2. Two credentials against one host: each can post only as itself; a non-member is refused; a body that names the other endpoint is refused.
-3. Drop the response to `post_board` and retry the same key. One post exists.
+3. Drop the response to `post_board` and retry the same key. One result exists. If a subscriber took that key, there is still no post file.
 4. Drop the response to `claim_task`, resume, and receive the same lease. The other endpoint cannot finish it.
 5. Acknowledge one post, disconnect, and poll. That post stays acknowledged and an unacknowledged post is still returned. An own post is absent for its author and present for the other member.
 6. Start a second writer on the same directory. It refuses while the primary holds the directory.

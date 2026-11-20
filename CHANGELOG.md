@@ -1,5 +1,13 @@
 # Changelog
 
+## After 0.4.0
+
+On main after tag `v0.4.0`. That tag was not moved, and the package version is still 0.4.0.
+
+- A refused tool call returns the request id and no result. A request whose id cannot be read still uses a null id.
+- Sample endpoint names in the docs and examples are alice and bob. They are not installed programs.
+- `post_board` says an answer returns delivered and writes no post file.
+
 ## 0.4.0
 
 Published on the existing public history. The parent is the previous public tip. `v0.3.0`, `v0.2.1`, `v0.2.0`, and `v0.1.0` were not moved.

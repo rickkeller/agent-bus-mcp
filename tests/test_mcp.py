@@ -230,7 +230,7 @@ def test_mcp_corrupt_task_record_is_sanitized(tmp_path: Path) -> None:
     task_path.write_text(json.dumps(task))
     app = MCPApplication(queue, "synthetic-secret")
     response = _request(app, [(b"authorization", b"Bearer synthetic-secret")], b'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"claim_task","arguments":{}}}')
-    assert json.loads(response[1]["body"]) == {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "request refused"}}
+    assert json.loads(response[1]["body"]) == {"jsonrpc": "2.0", "id": 1, "error": {"code": -32600, "message": "request refused"}}
 
 
 def test_help_lists_env_and_startup_names_the_missing_ones(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -365,7 +365,9 @@ def test_graph_member_can_post_read_and_promote_without_impersonation(tmp_path: 
         (north, {"board": "../room", "text": "path", "key": "path"}),
     ):
         refused = _call(app, "post_board", arguments)
+        assert refused["id"] == 1
         assert refused["error"]["message"] == "request refused"
+        assert "result" not in refused
     assert _call(witness, "read_board", {"board": "room"})["error"]["message"] == "request refused"
     assert _call(legacy, "read_board", {"board": "room"})["error"]["message"] == "request refused"
     spoofed = _call(

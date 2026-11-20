@@ -84,7 +84,6 @@ _BLOCKED = (
     "live restart",
     "restart the agent",
     "restart the process",
-    "firequant",
     "gateway restart",
     "restart gateway",
     "restart the gateway",

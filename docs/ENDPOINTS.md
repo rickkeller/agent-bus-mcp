@@ -2,10 +2,10 @@
 
 The bus carries two kinds of message. It does not call a model, and it does not start the other program. `ask` is not one of these messages. It is the optional MCP tool in the README, and this command does not send it.
 
-- **chat** is one short message. It expires. It does not become work.
-- **handoff** is one public HTTPS pointer. The bus does not fetch it and does not carry the file.
+- **chat** is one short message. It expires. It does not become work. In the JSON file the kind is `chat`. Later text calls this a consultation.
+- **handoff** is one public HTTPS pointer. The bus does not fetch it and does not carry the file. In the JSON file the kind is `handoff`. Later text calls this a task.
 
-A board is separate from both. It exists only when the config file has a `boards` entry. Installing does not add that entry. [Board](#board) below, and the README section Start here, are the board path.
+A board is separate from both. It exists only when the config file has a `boards` entry. Installing does not add that entry. [Board](#board) below, and the README section Start here, are the board path. Install from that section before the commands here. Hermes is optional. NATS is optional. An MCP agent calls the tools named below. It does not have to be a particular product.
 
 ## Allowlist
 
@@ -46,7 +46,9 @@ AGENT_BUS_ENDPOINT_ID=carol agent-bus-endpoint claim-handoff
 
 ## What this is not
 
-The MCP server is a separate door. It can claim and answer. When it is bound to a graph endpoint, that same identity can `post_board`, `read_board`, `poll_unread`, `ack_board`, and `promote_board`. The caller cannot name a different author. A post is at most 2048 bytes and does not create a task. With `AGENT_BUS_NATS_URL` unset, the post is a file and the other member is not notified. With it set, that post is one request on `board.<board>`, not a broadcast. One reply writes no file. Nobody subscribed, a listener that stays silent for 2 seconds, or a missing server writes the file, and the other member is still not notified. Only a promotion publishes `task.<destination>`, and that notice has no post text. Promote follows the author and one-member rules below. `read_board` and `poll_unread` do not acknowledge. A member's own posts are not unread for that member. `ack_board` records the exact post ids; an unknown id refuses the whole call, and repeating an ack does not change the result. Omit `after` to start at the oldest unread post. `after` only asks for the next page. `limit` is 1 to 20 and defaults to 20. There is no callback and no push. The other member calls `read_board` or `poll_unread` on a schedule you choose, then `ack_board`. `agent-bus-endpoint` can post and read a board. It cannot poll or acknowledge. Those two are MCP tools, and they are also tools on the TLS host in `docs/REMOTE.md`. Chat and pointer creation stay on `agent-bus-endpoint`. For a graph, start the server with `AGENT_BUS_CONFIG` and `AGENT_BUS_ENDPOINT_ID` set to the member, and leave `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID` unset. The simple producer/worker pair has no board and refuses those five tools. It also cannot open a graph that has more than that one edge.
+Each way in is a door. `agent-bus-endpoint` is the local command. The MCP server is what an MCP agent calls. The TLS host is `docs/REMOTE.md`.
+
+The MCP server can claim and answer. Graph mode is `AGENT_BUS_CONFIG` plus `AGENT_BUS_ENDPOINT_ID`, with the producer and worker ids unset. When the server is bound to one id in the JSON allowlist, that same identity can `post_board`, `read_board`, `poll_unread`, `ack_board`, and `promote_board`. The caller cannot name a different author. A post is at most 2048 bytes and does not create a task. With `AGENT_BUS_NATS_URL` unset, the post is a file and the other member is not notified. With it set, that post is one request on `board.<board>`, not a broadcast. One reply writes no file. Nobody subscribed, a listener that stays silent for 2 seconds, or a missing server writes the file, and the other member is still not notified. Only a promotion publishes `task.<destination>`, and that notice has no post text. Promote follows the author and one-member rules below. `read_board` and `poll_unread` do not acknowledge. A member's own posts are not unread for that member. `ack_board` records the exact post ids; an unknown id refuses the whole call, and repeating an ack does not change the result. Omit `after` to start at the oldest unread post. `after` only asks for the next page. `limit` is 1 to 20 and defaults to 20. There is no callback and no push. The other member calls `read_board` or `poll_unread` on a schedule you choose, then `ack_board`. `agent-bus-endpoint` can post and read a board. It cannot poll or acknowledge. Those two are MCP tools, and they are also tools on the TLS host in `docs/REMOTE.md`. Chat and pointer creation stay on `agent-bus-endpoint`. For a graph, start the server with `AGENT_BUS_CONFIG` and `AGENT_BUS_ENDPOINT_ID` set to the member, and leave `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID` unset. The simple producer/worker pair is `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID`, with no JSON allowlist. It has no board and refuses those five tools. It also refuses to open a state directory whose saved policy is not exactly that producer, that worker, and both a task and a consultation.
 
 Local chat does not retry until someone acts. The TLS host in `docs/REMOTE.md` is a separate door on one state directory. A same-machine test is not a two-computer proof.
 
@@ -68,4 +70,4 @@ AGENT_BUS_ENDPOINT_ID=north agent-bus-endpoint promote-board --board room --post
 AGENT_BUS_ENDPOINT_ID=south agent-bus-endpoint claim-handoff
 ```
 
-`examples/two-endpoints.json` is that graph. `north` and `south` are not built-in programs. Replace them. Copy that file only for a local proof. It is not a network, and it does not start either program.
+`examples/two-endpoints.json` is that allowlist. `north` and `south` are not built-in programs. Replace them. Copy that file only for a local proof. It is not a network, and it does not start either program.

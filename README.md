@@ -182,9 +182,11 @@ A pair that is not in the file is refused. This package does not start either en
 
 ## Worker door
 
-The MCP server is a later door. It can claim and answer. On a graph it can also post, read, poll, acknowledge, and promote a board it belongs to. It cannot create a chat, a pointer, or a task except by that author promotion. The environment variables and the Python snippet below are for that door. They are not the board setup in Start here, and they are not the alice and bob chat.
+A door is one way in. The local command `agent-bus-endpoint` is one door. The MCP server is the door an MCP agent uses. The TLS host in `docs/REMOTE.md` is a third. You do not need all three. Hermes is optional. NATS is optional.
 
-Agent Bus MCP is one logical bus for many configured agent principals behind authenticated adapters. Its local durable core stores policy-controlled, directed many-to-many pathways for quick advice and bounded jobs. A controller can give different jobs to multiple workers—virtual one-to-many assignments over shared state—without owning or monopolizing the transport.
+The MCP server claims and answers as the endpoint you set. On a board config it can also post, read, poll, acknowledge, and promote. It cannot create a chat or a pointer. It creates a task only when the author of a post promotes that post. The environment file and the Python snippet below are for the simple producer and worker pair. They are not the board setup in Start here, and they are not the alice and bob chat.
+
+One state directory is the shared bus. Each process is bound to one endpoint id, or to that simple pair. Several workers can use the same directory. Each one sees the work addressed to its own id.
 
 ## Requirements
 
@@ -207,7 +209,7 @@ python -m pip install -e '.[test]'
 
 ## Configuration
 
-The server is configured only through environment variables. `.env.example` lists the simple pair. Copy it to a private file outside the repo:
+The MCP process is selected by environment variables. Endpoints, chat, handoff, and any board live in a JSON allowlist, not in these variables. `.env.example` lists the simple pair, which has no board. Copy it to a private file outside the repo:
 
 ```sh
 install -d -m 700 "$HOME/.config/agent-bus-mcp" "$HOME/.local/state/agent-bus-mcp"
@@ -229,7 +231,7 @@ chmod 600 "$HOME/.config/agent-bus-mcp/env"
 
 A board is not an environment variable. It is a `boards` entry in the file named by `AGENT_BUS_CONFIG`. Installing does not write that entry. Each object has `id` and `members`, and `members` lists at least two names from `endpoints`. `examples/two-endpoints.json` has one entry. `examples/alice-bob.json` has none, so a board post is refused. The entry does not add a chat or handoff edge. The directory `boards/<id>/posts/` is created when the first post is stored, not when you save the config. [Start here](#start-here) is the full path.
 
-The simple pair is one producer and one worker. A graph server binds to one id in the allowlist instead. To connect more than those two, use [docs/ENDPOINTS.md](docs/ENDPOINTS.md). That file is the allowlist. You do not have to build the policy in Python.
+The simple pair is one producer and one worker, set with `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID`. Graph mode is the other choice: `AGENT_BUS_CONFIG` points at the JSON allowlist, and `AGENT_BUS_ENDPOINT_ID` is this process. Set one mode. [docs/ENDPOINTS.md](docs/ENDPOINTS.md) explains the JSON file. In that file, `chat` is a short question (a consultation) and `handoff` is a pointer (a task). You do not have to build that list in Python.
 
 ## Optional NATS offer
 
@@ -252,7 +254,7 @@ This quickstart is the simple producer and worker pair. It has no board. Board p
    agent-bus-mcp
    ```
 
-2. In a second shell, with the same environment loaded, create a task as the producer. Tasks can only be created locally from Python. MCP clients can't create them:
+2. In a second shell, with the same environment loaded, create a task as the producer. On this simple pair, a task is created from Python on this machine. An MCP client cannot create it. On a board, `promote_board` is the one MCP call that creates a task, and that is the Start here path, not this one:
 
    ```sh
    python - <<'PY'
@@ -305,8 +307,12 @@ This quickstart is the simple producer and worker pair. It has no board. Board p
 
 ### Two ways to use it
 
-- **Quick question:** use an edge whose policy allows `consultation` to ask for one short piece of advice, such as “Which heading is clearer?” The question expires, its addressed adviser may answer it once, and nothing is carried out automatically.
-- **Formal task:** use an edge whose policy allows `task` to hand off a bounded job with a goal and optional public web references. Its addressed worker claims it, then marks it completed or failed. A coding request is this formal task, created only by the local producer through `submit_coding_request`. It is not an advice question, and it is not an MCP tool.
+The detail below is the Python API. The board path in Start here does not need it. NATS and Hermes stay optional.
+
+An edge is one allowed direction: one endpoint may send one kind of message to another. In the JSON allowlist, `chat` is a consultation and `handoff` is a task.
+
+- **Quick question:** a `chat` edge asks for one short piece of advice, such as “Which heading is clearer?” The question expires, its addressed adviser may answer it once, and nothing is carried out automatically.
+- **Formal task:** a `handoff` edge hands off a bounded job with a goal and optional public web references. Its addressed worker claims it, then marks it completed or failed. A coding request is this formal task, created only by the local producer through `submit_coding_request`. It is not an advice question, and it is not an MCP tool.
 
 For example, an agent preparing a weekly update can ask, “Should the risks be a table or a short list?” The adviser can answer, “Use a short list for three items.” If someone then wants the report changed, the operator explicitly creates a normal task. The answer itself cannot make the change.
 
@@ -383,7 +389,7 @@ queue = DurableQueue(
 )
 ```
 
-When a parent-format state root has records but no `policy.json`, the first graph-bound open admits it only if every stored task edge allows `task` and every stored consultation edge allows `consultation`. Any absent edge or mode refuses the whole open before policy creation or record mutation.
+When an older state directory has records but no `policy.json`, the first graph-mode open admits it only if every stored task edge allows `task` and every stored consultation edge allows `consultation`. Any absent edge or mode refuses the whole open before policy creation or record mutation. A fresh install has no such directory.
 
 `claim_question` returns `status=empty` or a claimed question with its `consultation_id`, `origin_ref`, `question`, consultation expiry, lease ID, and lease expiry. A lease lasts at most 900 seconds and never extends beyond the question expiry. An expired lease may be reclaimed with a new fence while the question remains live. `answer_question` requires the exact live lease and one bounded answer. Wrong identities or leases, expired questions or leases, and every second answer are refused without revealing details.
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+Published on the existing public history. The parent is the previous public tip. `v0.3.0`, `v0.2.1`, `v0.2.0`, and `v0.1.0` were not moved.
+
+Changed:
+
+- When `AGENT_BUS_NATS_URL` is set, a board post is offered on `board.<board>` before a file is written. The offer carries the text. An answer returns `delivered` and leaves no post file. Nobody listening, a timeout, or a missing server writes the post and returns `posted`. The same key does not offer twice.
+- A promotion still writes the task, then publishes `task.<destination>` without the post text. A missing server does not fail that write.
+- The package still does not install a NATS server and does not start a listener. A stranger runs both.
+
+Leave `AGENT_BUS_NATS_URL` unset and `post_board` writes the file, as in 0.3.0. A client that assumes every `post_board` result has a post id must handle `delivered`.
+
 ## 0.3.0
 
 Published on the existing public history. The parent is the previous public tip. `v0.2.0` and `v0.1.0` were not moved.

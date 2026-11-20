@@ -225,9 +225,10 @@ def _mutate(queue: DurableQueue, config: Path, tool: str, arguments: dict) -> di
             board=arguments["board"],
             text=arguments["text"],
             key=arguments["key"],
+            notify_url=os.environ.get("AGENT_BUS_NATS_URL") or None,
         )
         return {
-            "status": "posted",
+            "status": "delivered" if posted.get("delivered") == "nats" else "posted",
             "post_id": posted["post_id"],
             "board": posted["board"],
             "author": posted["author"],
@@ -253,6 +254,7 @@ def _mutate(queue: DurableQueue, config: Path, tool: str, arguments: dict) -> di
             post_id=arguments["post"],
             key=arguments["key"],
             to=arguments.get("to"),
+            notify_url=os.environ.get("AGENT_BUS_NATS_URL") or None,
         )
         return {"status": "promoted", "task_id": task_id}
     if tool == "complete_task":

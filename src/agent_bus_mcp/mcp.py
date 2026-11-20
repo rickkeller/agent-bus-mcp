@@ -77,6 +77,9 @@ class MCPApplication:
         supplied = headers.get(b"authorization", b"").decode("ascii", "ignore")
         expected = f"Bearer {self.bearer_secret}"
         authenticated = hmac.compare_digest(supplied, expected)
+        # A connector opens GET /mcp for a live stream after a successful POST.
+        # This door has no stream. 401 there starts a sign-in this server cannot finish.
+        # A valid token gets 405. A missing or wrong token stays 401, and the body is not read.
         if scope.get("type") == "http" and scope.get("path") == "/mcp" and scope.get("method") != "POST" and authenticated:
             _note("-", 405)
             await self._send(send, 405, b"method not allowed", content_type=b"text/plain; charset=utf-8", extra=[(b"allow", b"POST")])
@@ -138,7 +141,7 @@ class MCPApplication:
         if method == "ping" and not params:
             return {"jsonrpc": "2.0", "id": request_id, "result": {}}
         if method == "initialize":
-            return {"jsonrpc": "2.0", "id": request_id, "result": {"protocolVersion": "2025-03-26", "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "agent-bus-mcp", "version": "0.3.0"}}}
+            return {"jsonrpc": "2.0", "id": request_id, "result": {"protocolVersion": "2025-03-26", "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "agent-bus-mcp", "version": "0.4.0"}}}
         if method == "tools/list" and not params:
             return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": list(TOOLS)}}
         if method != "tools/call" or set(params) != {"name", "arguments"} or not isinstance(params["arguments"], dict):
@@ -198,9 +201,16 @@ class MCPApplication:
     def _posted(self, board: object, text: object, key: object) -> dict:
         if not all(isinstance(item, str) for item in (board, text, key)):
             raise QueueRefused()
-        posted = post_board(self.queue, config=self._require_board(), board=board, text=text, key=key)
+        posted = post_board(
+            self.queue,
+            config=self._require_board(),
+            board=board,
+            text=text,
+            key=key,
+            notify_url=self.nats_url,
+        )
         return {
-            "status": "posted",
+            "status": "delivered" if posted.get("delivered") == "nats" else "posted",
             "post_id": posted["post_id"],
             "board": posted["board"],
             "author": posted["author"],
@@ -265,6 +275,7 @@ class MCPApplication:
             post_id=post_id,
             key=key,
             to=destination,
+            notify_url=self.nats_url,
         )
 
     @staticmethod

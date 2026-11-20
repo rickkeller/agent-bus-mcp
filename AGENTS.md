@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This package is a local durable bus. A worker may claim, answer, complete, or fail. A graph-bound member may post and read a board, and the author may promote one post into one handoff. The endpoint that promoted that post may read the stored result. Every other endpoint is refused. An answer does not become a task. A board post does not become a task.
+This package is a local durable bus. A worker may claim, answer, complete, or fail. A graph-bound member may post and read a board, and the author may promote one post into one handoff. When `AGENT_BUS_NATS_URL` is set, a post is offered on that server first. An answer leaves no post file. Nobody listening writes the file. The endpoint that promoted that post may read the stored result. Every other endpoint is refused. An answer does not become a task. A board post does not become a task.
 
 Do not add secrets, host paths, chat ids, or tokens. `.env.example` holds only `REPLACE_WITH_…` placeholders.
 
@@ -12,6 +12,7 @@ src/agent_bus_mcp/
   queue.py               RoutePolicy and the principal-bound DurableQueue
   mcp.py                 MCPApplication and the `agent-bus-mcp` entry point
   ask.py                 optional NATS request/reply client; does not install a server
+  notify.py              optional NATS offer before a board post is written; does not start a listener
   remote.py              TLS host: one state directory, one enrolled certificate per endpoint
   enroll.py              local enrollment and revocation, not a remote tool
   remote_call.py         TLS client for that host

@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
                 board=_flag(rest, "--board"),
                 text=_flag(rest, "--text"),
                 key=_flag(rest, "--key"),
+                notify_url=os.environ.get("AGENT_BUS_NATS_URL") or None,
             )
         elif command == "read-board":
             if rest != ["--board", _flag(rest, "--board")]:
@@ -113,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
                 post_id=_flag(rest, "--post"),
                 key=_flag(rest, "--key"),
                 to=_flag(rest, "--to") if "--to" in rest else None,
+                notify_url=os.environ.get("AGENT_BUS_NATS_URL") or None,
             )
         elif command == "complete-handoff":
             result = queue.finish(

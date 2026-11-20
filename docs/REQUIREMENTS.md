@@ -56,9 +56,11 @@ BR-21. Accepted 2026-11-08. A direct connection between two computers may use th
 
 BR-22. Accepted 2026-11-13. An optional local MCP call may ask one question over NATS request/reply. The operator supplies the server. This package does not install that server and does not start a listener. The call does not create a board post, a task, or a consultation. Nobody listening is a result, not a retry.
 
+BR-23. Accepted 2026-11-20. When the operator sets the NATS server, a board post is offered on `board.<board>` before a file is written. The offer carries the text. An answer leaves no post file. Nobody listening, a timeout, or a missing server writes the post and does not offer again. The same key does not offer twice. A promotion still writes the task, then publishes `task.<destination>` without the post text. This package does not install that server and does not start a listener.
+
 ## Technical specification
 
-TS-10, TS-11, and TS-12 specify the later accepted lines. Installer detail remains in `docs/ENDPOINTS.md`, `docs/REMOTE.md`, `docs/HERMES.md`, and `docs/MULTI_BOX.md`. Those files do not replace this section.
+TS-10, TS-11, TS-12, and TS-13 specify the later accepted lines. Installer detail remains in `docs/ENDPOINTS.md`, `docs/REMOTE.md`, `docs/HERMES.md`, and `docs/MULTI_BOX.md`. Those files do not replace this section.
 
 ### Identity
 
@@ -91,6 +93,8 @@ TS-10. Cites BR-20. `read_result` is on the local MCP door and the mutual-TLS do
 TS-11. Cites BR-21. The two-machine helper refuses `100.64.0.0/10` unless `AGENT_BUS_ALLOW_TAILSCALE` is exactly `1`. That opt-in adds no other range. Public addresses, `0.0.0.0`, and hostnames stay refused. TLS verification is unchanged. This specification does not bind that range.
 
 TS-12. Cites BR-22. `ask` is on the local MCP door only. It needs `AGENT_BUS_NATS_URL`. `work` is one token of letters, digits, and hyphens. The subject is `ask.<work>`. One queue group, `agent-bus`, takes each ask. Nobody listening returns `no_responders` at once. A silent listener returns `timeout` at the deadline. An answer returns `answered`. The call writes no board post, task, or consultation. The mutual-TLS host does not expose this tool.
+
+TS-13. Cites BR-23. When `AGENT_BUS_NATS_URL` is set, `post_board` offers the text on `board.<board>` and waits up to 2 seconds. An answer returns `delivered`, stores the key, and writes no post file. The same key returns that result and does not offer again. Nobody listening, a timeout, or a missing server writes the post and returns `posted`. A promotion writes the task first, then publishes one message on `task.<destination>` that names the task and omits the post text. A missing server does not fail that write. Leave the variable unset and the post is written, as before. The mutual-TLS host uses the same rule when that variable is set in its process. This package does not install the server and does not start a listener.
 
 ### Not built
 

@@ -8,6 +8,7 @@ import secrets
 from pathlib import Path
 
 from .queue import DurableQueue, QueueRefused, RoutePolicy, _identity, _instant, _parse_stamp
+from .notify import board_subject, offer, publish_wake, task_subject
 
 CHAT_TTL_SECONDS = 86400
 BOARD_TEXT_BYTES = 2048
@@ -204,8 +205,21 @@ def _sequence(value: object) -> bool:
     return type(value) is int and value >= 1
 
 
-def post_board(queue: DurableQueue, *, config: Path, board: str, text: str, key: str) -> dict:
-    """Post on a board. Members can read it. It does not become work."""
+def post_board(
+    queue: DurableQueue,
+    *,
+    config: Path,
+    board: str,
+    text: str,
+    key: str,
+    notify_url: str | None = None,
+) -> dict:
+    """Post on a board only when nobody takes the live offer.
+
+    When notify_url is set, the text is offered on board.<board> first. An
+    answer stores the key and does not write a post. Nobody listening, a
+    timeout, or a missing server writes the post and does not offer again.
+    """
     if (
         not isinstance(text, str)
         or not text.strip()
@@ -220,8 +234,46 @@ def post_board(queue: DurableQueue, *, config: Path, board: str, text: str, key:
     key_path = root / "keys" / str(queue.agent_id) / key
     with queue._locked():
         if key_path.exists():
+            saved = queue._read(key_path)
+            if saved.get("delivered") == "nats":
+                return saved["result"]
             _board_posts_locked(queue, board)
-            post_id = queue._read(key_path)["post_id"]
+            post_id = saved["post_id"]
+            for member in members:
+                queue.note_availability(member)
+            return queue._read(root / "posts" / ("%s.json" % post_id))
+    if notify_url:
+        taken = offer(
+            notify_url,
+            board_subject(board),
+            {"kind": "post", "board": board, "author": queue.agent_id, "text": text, "key": key},
+        )
+        if taken == "answered":
+            result = {
+                "post_id": None,
+                "board": board,
+                "author": queue.agent_id,
+                "text": text,
+                "seq": None,
+                "handoff_id": None,
+                "delivered": "nats",
+            }
+            with queue._locked():
+                if key_path.exists():
+                    saved = queue._read(key_path)
+                    if saved.get("delivered") == "nats":
+                        return saved["result"]
+                    return queue._read(root / "posts" / ("%s.json" % saved["post_id"]))
+                key_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                os_chmod(root)
+                queue._write(key_path, {"delivered": "nats", "result": result})
+            return result
+    with queue._locked():
+        if key_path.exists():
+            saved = queue._read(key_path)
+            if saved.get("delivered") == "nats":
+                return saved["result"]
+            post_id = saved["post_id"]
             for member in members:
                 queue.note_availability(member)
             return queue._read(root / "posts" / ("%s.json" % post_id))
@@ -243,7 +295,7 @@ def post_board(queue: DurableQueue, *, config: Path, board: str, text: str, key:
         queue._write(key_path, {"post_id": post_id})
         for member in members:
             queue.note_availability(member)
-        return record
+    return record
 
 
 def read_board(queue: DurableQueue, *, config: Path, board: str) -> list[dict]:
@@ -438,6 +490,7 @@ def promote_board(
     post_id: str,
     key: str,
     to: str | None = None,
+    notify_url: str | None = None,
 ) -> str:
     """Turn the author's post into one handoff owned by one other member.
 
@@ -497,6 +550,7 @@ def promote_board(
         queue._write(post_path, post)
         _promotion_sidecar(queue, task_id, board, post_id, destination)
         queue.note_availability(destination)
+    _publish_task(notify_url, board, post_id, task_id, destination)
     return task_id
 
 
@@ -515,6 +569,34 @@ def _post_id(value: object) -> bool:
         return False
     suffix = value[5:]
     return len(suffix) == 32 and all(char in "0123456789abcdef" for char in suffix)
+
+
+def _publish_post(url: str | None, record: dict) -> None:
+    publish_wake(
+        url,
+        board_subject(record.get("board")),
+        {
+            "kind": "post",
+            "board": record["board"],
+            "post_id": record["post_id"],
+            "author": record["author"],
+            "seq": record["seq"],
+        },
+    )
+
+
+def _publish_task(url: str | None, board: str, post_id: str, task_id: str, destination: str) -> None:
+    publish_wake(
+        url,
+        task_subject(destination),
+        {
+            "kind": "task",
+            "board": board,
+            "post_id": post_id,
+            "task_id": task_id,
+            "destination": destination,
+        },
+    )
 
 
 def os_chmod(path: Path) -> None:

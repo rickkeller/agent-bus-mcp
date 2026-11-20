@@ -1,12 +1,12 @@
 # Agent Bus MCP
 
-A local durable bus where configured endpoints can ask short questions and hand off bounded work. Package version 0.3.0 in this tree is this publication. The previous public release remains `v0.2.0`.
+A local durable bus where configured endpoints can ask short questions and hand off bounded work. Package version 0.4.0 in this tree is this publication. The previous public release remains `v0.3.0`.
 
 The requirements and the technical specification are `docs/REQUIREMENTS.md`. Read `MIGRATION.md` before upgrading an existing install. Review [SECURITY.md](SECURITY.md) before connecting a worker.
 
 A small, local, authenticated [MCP](https://modelcontextprotocol.io) server that lets one AI agent hand **bounded tasks** and **quick advice-only questions** to other agents. Everything goes through a durable on-disk queue. A local producer creates the work, and a worker agent connects over MCP to claim it and answer it.
 
-> **Status: 0.3.0.** This is the local durable core, plus one optional NATS request/reply ask. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
+> **Status: 0.4.0.** This is the local durable core, plus an optional NATS offer before a board post is written, and one optional NATS request/reply ask. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
 
 ## Connect two endpoints
 
@@ -92,9 +92,19 @@ chmod 600 "$HOME/.config/agent-bus-mcp/env"
 | `AGENT_BUS_WORKER_ID` | simple pair | ID of the agent that connects over MCP and does the work. Same rules. Omit this in graph mode. |
 | `AGENT_BUS_CONFIG` | graph mode | Path of the endpoints allowlist. Set this with `AGENT_BUS_ENDPOINT_ID`, and leave the simple pair unset. |
 | `AGENT_BUS_ENDPOINT_ID` | graph mode | Endpoint id this MCP process claims and answers as. Same character rules. |
-| `AGENT_BUS_NATS_URL` | no | NATS server for the optional `ask` tool, for example `nats://127.0.0.1:4222`. Leave it unset and `ask` is refused. |
+| `AGENT_BUS_NATS_URL` | no | NATS server for the optional board offer and the optional `ask` tool, for example `nats://127.0.0.1:4222`. Leave it unset and a board post is written as a file. `ask` is refused. |
 
 The simple pair is one producer and one worker. A graph server binds to one id in the allowlist instead. To connect more than those two, use [docs/ENDPOINTS.md](docs/ENDPOINTS.md). That file is the allowlist. You do not have to build the policy in Python.
+
+## Optional NATS offer
+
+This package does not install a NATS server, and it does not start a listener.
+
+When `AGENT_BUS_NATS_URL` is set, `post_board` offers the text on `board.<board>` before it writes a file. One subscriber answers that request. An answer returns `delivered`, `post_id` is null, and no post file is written. The same key does not offer again. Nobody listening, a subscriber that does not answer within 2 seconds, or a missing server writes the post and returns `posted`, as before. A client that requires a post id must treat `delivered` as taken, not as a missing post.
+
+A promotion still writes the task, then publishes one message on `task.<destination>`. That message names the task. It does not carry the post text. A missing server does not fail the promotion.
+
+Run the server yourself. A separate program you run must subscribe to `board.>` and reply if it is going to take the post. This package does not start that program.
 
 ## Optional NATS ask
 
@@ -180,7 +190,7 @@ The MCP worker surface exposes twelve tools:
 
 - `claim_task`, `complete_task`, `fail_task`, and `read_result` for formal work. `read_result` returns one promoted task's status and stored result only to the endpoint that promoted the post which created that task. Every other endpoint is refused. A task that was not promoted from a board is refused. The result text is not part of `wait_available`.
 - `claim_question` and `answer_question` for advice-only consultations.
-- `post_board`, `read_board`, `poll_unread`, `ack_board`, and `promote_board` for a graph-bound member. A board post is at most 2048 bytes. Reading and polling do not acknowledge. Own posts are not unread. `ack_board` names the posts that stop being unread. Each page has at most 20 posts. The simple pair refuses these five.
+- `post_board`, `read_board`, `poll_unread`, `ack_board`, and `promote_board` for a graph-bound member. A board post is at most 2048 bytes. When `AGENT_BUS_NATS_URL` is set, the text is offered on `board.<board>` first. An answer returns `delivered` and writes no post file. Nobody listening, a timeout, or a missing server returns `posted` and writes the file. Reading and polling do not acknowledge. Own posts are not unread. `ack_board` names the posts that stop being unread. Each page has at most 20 posts. The simple pair refuses these five.
 - `ask` sends one question on subject `ask.<work>` over NATS request/reply and waits for one answer. It needs `AGENT_BUS_NATS_URL`. It does not create a board post, a task, or a consultation. A spaced work name is refused. Nobody listening returns `no_responders` at once.
 
 Each bearer-authenticated `MCPApplication` wraps one principal-bound queue object. MCP calls cannot choose or override source, worker, agent, or author identities. No tool fetches URLs, opens files, runs a shell command, or routes to another worker. A consultation or an ordinary task is still created only by the local process. `promote_board` is the one MCP call that creates a task, and only from a post that bound endpoint authored.

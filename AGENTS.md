@@ -1,6 +1,10 @@
 # AGENTS.md
 
-This package is a local durable bus. A worker may claim, answer, complete, or fail. A graph-bound member may post and read a board, and the author may promote one post into one handoff. When `AGENT_BUS_NATS_URL` is set, a post is offered on that server first. An answer leaves no post file. Nobody listening writes the file. The endpoint that promoted that post may read the stored result. Every other endpoint is refused. An answer does not become a task. A board post does not become a task.
+This package is a local durable bus. A worker may claim, answer, complete, or fail. A graph-bound member may post and read a board, and the author may promote one post into one handoff. A board exists only when the config has a `boards` entry with an id and at least two members. Installing does not create that entry. The folder `boards/<id>/posts/` appears when a post is first written.
+
+With `AGENT_BUS_NATS_URL` unset, that write does not notify the other member. They see the post by reading or by `poll_unread`, then `ack_board`. When the variable is set, the post is one request on `board.<board>` and one reply, not a broadcast. An answer leaves no post file. Nobody listening writes the file. Only promotion publishes `task.<destination>`. The README sections Start here and How the other side sees a post spell this out. `examples/board_listener.py` is an example listener, not a package command.
+
+The endpoint that promoted that post may read the stored result. Every other endpoint is refused. An answer does not become a task. A board post does not become a task.
 
 Do not add secrets, host paths, chat ids, or tokens. `.env.example` holds only `REPLACE_WITH_…` placeholders.
 
@@ -27,6 +31,9 @@ docs/REQUIREMENTS.md     requirements and specification
 docs/ENDPOINTS.md        how to connect installed endpoints
 docs/REMOTE.md           TLS host
 docs/HERMES.md           optional process adapter
+examples/two-endpoints.json  board config for the README Start here path
+examples/alice-bob.json      chat-only config; no boards entry
+examples/board_listener.py   example NATS reply listener; not a package command
 .env.example             environment placeholders
 SECURITY.md              threat model and operator responsibilities
 ```

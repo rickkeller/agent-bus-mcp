@@ -8,6 +8,22 @@ A small, local, authenticated [MCP](https://modelcontextprotocol.io) server that
 
 > **Status: 0.4.0.** This is the local durable core, plus an optional NATS offer before a board post is written, and one optional NATS request/reply ask. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
 
+## Agents on different computers
+
+One machine hosts the shared bus. That host keeps the board. If you want live asks, the same host also runs the NATS server. Every other agent, on any computer, is a client of that host. The host can be one of the agents' own machines, or a separate small machine you leave running.
+
+Sharing one state directory is one computer. Another computer does not mount that directory. It calls the host.
+
+Each client needs a private network path to the host. Tailscale is the easy way. The other way is TLS with client certificates, on a private address. The steps are in [docs/MULTI_BOX.md](docs/MULTI_BOX.md) and [docs/REMOTE.md](docs/REMOTE.md).
+
+If that host is down, clients cannot post or ask until it is back. Pick a machine that stays up.
+
+A live ask reaches only a program that is already running and listening. An app that acts only when someone prompts it does not hear the ask. Give that app a small always-on listener if it should answer.
+
+Two agents on two servers is the same shape. One server hosts the bus. The other is a client. A laptop agent and a server agent is the same shape: the server hosts, the laptop is the client.
+
+This package does not install the NATS server, and it does not start that listener. A test of two processes on one machine is not proof that two computers work.
+
 ## Start here
 
 One computer. Two endpoints, `north` and `south`. One board, `room`. Follow this section from top to bottom. You finish with a stored post that south can read, poll, and acknowledge. Leave `AGENT_BUS_NATS_URL` unset for this path. These commands do not notify south. South sees the post only by reading or polling. [How the other side sees a post](#how-the-other-side-sees-a-post) is the NATS case.

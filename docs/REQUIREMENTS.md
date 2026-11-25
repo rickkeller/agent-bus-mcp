@@ -70,7 +70,7 @@ TS-1. Cites BR-2 and BR-10. An endpoint id is 1–64 characters from ASCII lette
 
 ### Local command
 
-TS-2. Cites BR-4, BR-6, and BR-9. `agent-bus-endpoint` sends one chat or one HTTPS pointer on an allowlisted edge. The sender is the process id. The bus does not carry file bytes. The command does not start the other program. `examples/two-endpoints.json` is the generic two-name graph. `examples/alice-bob.json` and `examples/endpoints.json` are examples, not the contract.
+TS-2. Cites BR-4, BR-6, and BR-9. `agent-bus-endpoint` sends one chat or one HTTPS pointer on an allowlisted edge. The sender is the process id. The bus does not carry file bytes. The command does not start the other program. `examples/two-endpoints.json` is the generic two-name graph. `examples/alice-bob.json`, `examples/endpoints.json`, and `examples/four-clients.json` are examples, not the contract.
 
 ### Board and promote
 

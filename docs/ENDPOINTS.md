@@ -11,7 +11,7 @@ A board is separate from both. It exists only when the config file has a `boards
 
 For chat only, copy `examples/alice-bob.json`. It allows chat from bob to alice and from alice to bob. It has no `boards` entry. A board post with that file is refused. Copy `examples/endpoints.json` only when you want the other names. That file also has no `boards` entry. Keep the endpoint names you want and delete the rest. An edge says who may send which kind to whom. A missing edge is refused.
 
-For a board, copy `examples/two-endpoints.json`. Its `boards` line is the board. The README section Start here runs that file through post, read, poll, and ack.
+For a board, copy `examples/two-endpoints.json`. Its `boards` line is the board. The README section Start here runs that file through post, read, poll, and ack. `examples/four-clients.json` is three endpoints and three boards. The write-up is `docs/FOUR_CLIENTS.md`.
 
 An endpoint id is 1–64 characters from `A-Z`, `a-z`, `0-9`, `_`, or `-`. Do not put a token, a host path, or a chat id in this file.
 

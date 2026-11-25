@@ -1,0 +1,16 @@
+{
+  "endpoints": ["assistant", "coder", "orchestrator"],
+  "allow": [
+    {"from": "assistant", "to": "coder", "kinds": ["chat", "handoff"]},
+    {"from": "assistant", "to": "orchestrator", "kinds": ["chat"]},
+    {"from": "coder", "to": "assistant", "kinds": ["chat"]},
+    {"from": "coder", "to": "orchestrator", "kinds": ["chat"]},
+    {"from": "orchestrator", "to": "assistant", "kinds": ["chat", "handoff"]},
+    {"from": "orchestrator", "to": "coder", "kinds": ["chat", "handoff"]}
+  ],
+  "boards": [
+    {"id": "ops", "members": ["assistant", "orchestrator"]},
+    {"id": "desk", "members": ["assistant", "coder"]},
+    {"id": "bench", "members": ["orchestrator", "coder"]}
+  ]
+}

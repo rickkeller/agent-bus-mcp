@@ -33,7 +33,9 @@ docs/REQUIREMENTS.md     requirements and specification
 docs/ENDPOINTS.md        how to connect installed endpoints
 docs/REMOTE.md           TLS host
 docs/HERMES.md           optional process adapter
+docs/FOUR_CLIENTS.md     four products on one bus; example only
 examples/two-endpoints.json  board config for the README Start here path
+examples/four-clients.json   three endpoints and three boards
 examples/alice-bob.json      chat-only config; no boards entry
 examples/board_listener.py   example NATS reply listener; not a package command
 .env.example             environment placeholders

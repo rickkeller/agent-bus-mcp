@@ -122,6 +122,8 @@ Another agent has to notice the work itself. Pick one of these, and run it yours
 - Call `wait_available` from a process that stays connected to the TLS host. The call returns a hint. It does not start your agent. That tool is not on the local MCP server. See [docs/REMOTE.md](docs/REMOTE.md).
 - Call `poll_unread` on a timer you run, then `ack_board`. This package does not run the timer. This sees a stored post, so leave the NATS listener stopped when you want the file.
 
+Four products on one directory are written up in [docs/FOUR_CLIENTS.md](docs/FOUR_CLIENTS.md). The allowlist is `examples/four-clients.json`. The endpoint ids are `assistant`, `coder`, and `orchestrator`. The boards are `ops`, `desk`, and `bench`. Grok Bot is `assistant`. Cursor and Claude Code are two clients of `coder`. Hermes Agent is `orchestrator`. The file is an example. It does not start those products.
+
 ## Run a NATS server
 
 This package does not install a NATS server, and it does not start a listener. `nats-py` is the client, and it is installed with the package.
@@ -229,7 +231,7 @@ chmod 600 "$HOME/.config/agent-bus-mcp/env"
 | `AGENT_BUS_ENDPOINT_ID` | graph mode | Endpoint id this MCP process claims and answers as. Same character rules. |
 | `AGENT_BUS_NATS_URL` | no | NATS server, for example `nats://127.0.0.1:4222`. Leave it unset and a board post is only a file. The other member is not notified. Set it and a post is one request on `board.<board>` before any file is written. `ask` is refused when this is unset. |
 
-A board is not an environment variable. It is a `boards` entry in the file named by `AGENT_BUS_CONFIG`. Installing does not write that entry. Each object has `id` and `members`, and `members` lists at least two names from `endpoints`. `examples/two-endpoints.json` has one entry. `examples/alice-bob.json` has none, so a board post is refused. The entry does not add a chat or handoff edge. The directory `boards/<id>/posts/` is created when the first post is stored, not when you save the config. [Start here](#start-here) is the full path.
+A board is not an environment variable. It is a `boards` entry in the file named by `AGENT_BUS_CONFIG`. Installing does not write that entry. Each object has `id` and `members`, and `members` lists at least two names from `endpoints`. `examples/two-endpoints.json` has one entry. `examples/four-clients.json` has three. See [docs/FOUR_CLIENTS.md](docs/FOUR_CLIENTS.md). `examples/alice-bob.json` has none, so a board post is refused. The entry does not add a chat or handoff edge. The directory `boards/<id>/posts/` is created when the first post is stored, not when you save the config. [Start here](#start-here) is the full path.
 
 The simple pair is one producer and one worker, set with `AGENT_BUS_PRODUCER_ID` and `AGENT_BUS_WORKER_ID`. Graph mode is the other choice: `AGENT_BUS_CONFIG` points at the JSON allowlist, and `AGENT_BUS_ENDPOINT_ID` is this process. Set one mode. [docs/ENDPOINTS.md](docs/ENDPOINTS.md) explains the JSON file. In that file, `chat` is a short question (a consultation) and `handoff` is a pointer (a task). You do not have to build that list in Python.
 

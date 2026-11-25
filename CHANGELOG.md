@@ -4,6 +4,7 @@
 
 On main after tag `v0.4.0`. That tag was not moved, and the package version is still 0.4.0.
 
+- `examples/four-clients.json` and `docs/FOUR_CLIENTS.md` are an example of three endpoints and three boards. Grok Bot, Claude Code, Cursor, and Hermes Agent are clients. The endpoint ids are assistant, coder, and orchestrator. The file does not start those products.
 - A refused tool call returns the request id and no result. A request whose id cannot be read still uses a null id.
 - Sample endpoint names in the docs and examples are alice and bob. They are not installed programs.
 - `post_board` says an answer returns delivered and writes no post file.

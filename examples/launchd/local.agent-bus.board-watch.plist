@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd template for examples/board-watch.py on macOS.
+  Replace every USER with your macOS short name (run: id -un) and fix the
+  checkout path if you cloned somewhere else. Secrets stay in
+  ~/.agent-bus-watch/watch.env (mode 600), never in this file.
+  Install:  cp to ~/Library/LaunchAgents/ then
+            launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.agent-bus.board-watch.plist
+  Stop:     launchctl bootout gui/$(id -u)/local.agent-bus.board-watch
+  Restart:  launchctl kickstart -k gui/$(id -u)/local.agent-bus.board-watch
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.agent-bus.board-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/USER/agent-bus-mcp/examples/board-watch.py</string>
+    <string>run</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/Users/USER/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key>
+    <string>/Users/USER</string>
+  </dict>
+  <key>WorkingDirectory</key>
+  <string>/Users/USER</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/USER/.agent-bus-watch/launchd.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/USER/.agent-bus-watch/launchd.err</string>
+</dict>
+</plist>

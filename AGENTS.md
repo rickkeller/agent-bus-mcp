@@ -40,6 +40,8 @@ examples/two-endpoints.json  board config for the README Start here path
 examples/four-clients.json   three endpoints and three boards
 examples/alice-bob.json      chat-only config; no boards entry
 examples/board_listener.py   example NATS reply listener; not a package command
+examples/board-watch.py      operator-side watcher; loops wait_unread and starts one agent turn per batch
+scripts/listener-setup.sh    one-command setup for that watcher; operator convenience, not a package command
 .env.example             environment placeholders
 SECURITY.md              threat model and operator responsibilities
 ```

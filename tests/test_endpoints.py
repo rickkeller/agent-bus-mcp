@@ -117,7 +117,7 @@ def test_cli_uses_the_process_endpoint(tmp_path: Path, monkeypatch: pytest.Monke
     assert main(["post-chat", "--to", "dave", "--text", "no", "--key", "cli-2"]) == 2
 
 
-def test_file_accepted_is_work_and_blocks_the_gates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_file_accepted_is_work_and_refuses_a_spoofed_caller(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     config = tmp_path / "endpoints.json"
     config.write_text(
         json.dumps(
@@ -136,11 +136,11 @@ def test_file_accepted_is_work_and_blocks_the_gates(tmp_path: Path, monkeypatch:
     assert file_accepted(alice, to="bob", text="develop the intake", caller_id="alice", key="once") == first
     assert file_accepted(alice, to="bob", text="update the secretary note", caller_id="alice", key="note") != first
     assert list((state / "consultations").glob("consultation_*.json")) == []
-    with pytest.raises(QueueRefused):
-        file_accepted(alice, to="bob", text="restart the gateway", caller_id="alice", key="blocked")
-    with pytest.raises(QueueRefused):
-        file_accepted(alice, to="bob", text="do not spend on this", caller_id="alice", key="spend")
-    with pytest.raises(QueueRefused):
+    assert file_accepted(alice, to="bob", text="restart the gateway", caller_id="alice", key="blocked")
+    assert file_accepted(alice, to="bob", text="do not spend on this", caller_id="alice", key="spend")
+    with pytest.raises(QueueRefused, match=r"^request refused: contains a control character at position 6$"):
+        file_accepted(alice, to="bob", text="unsafe\x00text", caller_id="alice", key="control")
+    with pytest.raises(QueueRefused, match=r"^request refused: caller is not this endpoint$"):
         file_accepted(alice, to="bob", text="develop the intake", caller_id="bob", key="spoof")
     monkeypatch.setenv("AGENT_BUS_STATE_DIR", str(state))
     monkeypatch.setenv("AGENT_BUS_CONFIG", str(config))

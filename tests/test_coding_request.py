@@ -35,6 +35,7 @@ def test_coding_request_is_a_local_task_not_a_question(tmp_path: Path) -> None:
         "read_board",
         "poll_unread",
         "ack_board",
+        "wait_unread",
         "promote_board",
         "ask",
     ]

@@ -15,16 +15,18 @@ Do not add secrets, host paths, chat ids, or tokens. `.env.example` holds only `
 ```
 src/agent_bus_mcp/
   __init__.py            exports DurableQueue, QueueRefused, RoutePolicy
-  queue.py               RoutePolicy and the principal-bound DurableQueue
-  mcp.py                 MCPApplication and the `agent-bus-mcp` entry point
+  queue.py               RoutePolicy and the principal-bound DurableQueue (tasks, consultations, leases, idempotency)
+  mcp.py                 MCPApplication (ASGI, bearer auth, POST /mcp JSON-RPC, thirteen tools) and the `agent-bus-mcp` entry point
   ask.py                 optional NATS request/reply client; does not install a server
-  notify.py              optional NATS offer before a board post is written; does not start a listener
+  notify.py              optional NATS live offer and wake for a written board post; does not start a listener
   remote.py              TLS host: one state directory, one enrolled certificate per endpoint
   enroll.py              local enrollment and revocation, not a remote tool
   remote_call.py         TLS client for that host
   endpoint.py            `agent-bus-endpoint`, the local sender for one configured endpoint
+  setup.py               `agent-bus setup`, `doctor`, `run`, and `endpoint`. Writes ~/.agent-bus and does not print the bearer token.
   endpoints.py           allowlist loader for chat and handoff
   hermes_adapter.py      optional starter; the program must be the hermes binary
+  webhook.py             opt-in signed webhook wake (config `webhooks` block), sent off the write path
   recurring.py           `agent-bus-public-research`, an example recurring task producer
   research_manifest.json example manifest (uses a .invalid domain)
 tests/                   pytest suite
@@ -54,8 +56,9 @@ For a manual run, use a throwaway state directory such as `$(mktemp -d)`, a rand
 
 ## Conventions
 
-- Keep the boundary closed. Don't add MCP tools that create questions, chats, pointers, or ordinary tasks, and don't add tools that fetch URLs, open files, run commands, route to another worker, or call an external webhook. A graph-bound member may post, read, and poll a board. Polling does not acknowledge. `ack_board` names the exact posts. Only the author may promote that post, which creates one handoff to one other member. Remote callers never choose source, worker, author, or endpoint IDs.
-- Every state change goes through the process lock, atomic JSON replacement, and fsync. Keep lease fencing intact.
-- Refusals don't reveal details. Raise `QueueRefused` or return a generic error.
-- `uvicorn` and `nats-py` are the runtime dependencies. `nats-py` is the client. This package does not install a NATS server or start a listener.
+- Keep the boundary closed. Don't add MCP tools that create questions, chats, pointers, or ordinary tasks, and don't add tools that fetch URLs, open files, run commands, route to another worker, or call an external webhook. The one outbound request is the operator-configured webhook wake in `webhook.py`: off without a `webhooks` block, never chosen by a tool argument, ids only and never post text, signed, sent on a background thread so it cannot block or fail a write, and logged by scheme and host only. A graph-bound member may post, read, and poll a board. Polling does not acknowledge. `ack_board` names the exact posts. Only the author may promote that post, which creates one handoff to one other member. Remote callers never choose source, worker, author, or endpoint IDs.
+- Every state change goes through the process lock, atomic JSON replacement and fsync. Keep lease fencing intact.
+- Keep the limits (byte caps, expiry ranges, the four-reference cap, the ID character set) in step with README.md. Change both together.
+- A refused tool call keeps JSON-RPC code `-32600` and names the failed check: byte counts, limits, positions, and field names only. Do not echo secrets or the refused content. Authentication, revocation, a closed TLS wait, unreadable stored state, and unexpected errors stay a bare `request refused`. Raise `QueueRefused` with that reason, or return the same text as the error message.
+- `uvicorn` and `nats-py` are the runtime dependencies. `nats-py` is the client. This package does not install a NATS server or start a listener. Don't add more without a strong reason.
 - Every behaviour change needs a test.

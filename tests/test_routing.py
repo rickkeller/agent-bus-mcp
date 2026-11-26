@@ -93,7 +93,7 @@ def test_authority_identities_use_ascii_grammar() -> None:
     assert valid.allows("producer", "worker_1", "task")
 
     confusable_worker = "w\u043erker"
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         _policy(
             {"producer", confusable_worker},
             {("producer", confusable_worker): {"task"}},
@@ -109,7 +109,7 @@ def test_route_policy_requires_exact_builtin_route_scalars(route_part: str) -> N
     destination = TextSubclass("worker") if route_part == "destination" else "worker"
     mode = TextSubclass("task") if route_part == "mode" else "task"
 
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         _policy(
             {"producer", "worker"},
             {(source, destination): {mode}},
@@ -119,7 +119,7 @@ def test_route_policy_requires_exact_builtin_route_scalars(route_part: str) -> N
 def test_constructor_identities_refuse_non_ascii_before_state_creation(tmp_path: Path) -> None:
     confusable_worker = "w\u043erker"
     legacy_root = tmp_path / "legacy"
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         DurableQueue(legacy_root, producer_id="producer", worker_id=confusable_worker)
     assert not legacy_root.exists()
 
@@ -128,7 +128,7 @@ def test_constructor_identities_refuse_non_ascii_before_state_creation(tmp_path:
         {("producer", "worker_1"): {"task"}},
     )
     bound_root = tmp_path / "bound"
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         DurableQueue(bound_root, policy=policy, agent_id=confusable_worker)
     assert not bound_root.exists()
 
@@ -217,7 +217,7 @@ def test_many_to_many_routes_bind_principals_and_isolate_workers(tmp_path: Path)
         destination_id="worker_b", goal="retry cannot replace", references=[], idempotency_key="shared"
     ) == from_producer_b
 
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         producer_b.enqueue(
             destination_id="worker_a", goal="forbidden", references=[], idempotency_key="shared"
         )
@@ -227,16 +227,16 @@ def test_many_to_many_routes_bind_principals_and_isolate_workers(tmp_path: Path)
     assert all(claims)
     assert {claim["task_id"] for claim in claims if claim} == {from_controller, from_producer_b}
     claim_by_task = {claim["task_id"]: claim for claim in claims if claim}
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         worker_a.finish(
             task_id=from_controller,
             lease_id=claim_by_task[from_controller]["lease_id"],
             result="stolen",
             failed=False,
         )
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         worker_a.read_task(from_controller)
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         producer_b.read_task(from_controller)
 
     assert worker_b.finish(
@@ -283,7 +283,7 @@ def test_route_modes_keep_tasks_and_consultations_separate(tmp_path: Path) -> No
     assert task_claim and task_claim["task_id"] == task_id
     assert question_claim and question_claim["consultation_id"] == question["consultation_id"]
 
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         controller.ask_question(
             destination_id="task_worker",
             question="Wrong mode",
@@ -291,7 +291,7 @@ def test_route_modes_keep_tasks_and_consultations_separate(tmp_path: Path) -> No
             idempotency_key="wrong-consultation-mode",
             expires_in_seconds=60,
         )
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         controller.enqueue(
             destination_id="advisor",
             goal="wrong mode",
@@ -319,7 +319,7 @@ def test_terminal_task_replay_remains_bound_to_destination_worker(tmp_path: Path
         result="done",
         failed=False,
     ) == "completed"
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         other_worker.finish(
             task_id=task_id,
             lease_id=claimed["lease_id"],
@@ -335,7 +335,7 @@ def test_terminal_task_replay_remains_bound_to_destination_worker(tmp_path: Path
 
 
 def test_graph_is_primary_and_explicit_two_agent_pair_is_compatible(tmp_path: Path) -> None:
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         DurableQueue(tmp_path / "implicit")
 
     queue = DurableQueue(
@@ -417,7 +417,7 @@ def test_incompatible_policy_refuses_parent_format_before_mutation(
     before = _parent_record_bytes(root)
     policy = _policy({"producer", "worker", "other"}, routes)
 
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         DurableQueue(root, policy=policy, agent_id="producer")
 
     assert not (root / "policy.json").exists()
@@ -444,7 +444,7 @@ def test_non_object_parent_record_is_refused_before_mutation(
         {("producer", "worker"): {"task", "consultation"}},
     )
 
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         DurableQueue(root, policy=policy, agent_id="producer")
 
     assert not (root / "policy.json").exists()
@@ -499,7 +499,7 @@ def test_parent_record_requires_expected_scalar_types_before_policy_write(
         {("producer", "worker"): {"task", "consultation"}},
     )
 
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         DurableQueue(root, policy=policy, agent_id="producer")
 
     assert not (root / "policy.json").exists()

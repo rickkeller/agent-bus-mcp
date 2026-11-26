@@ -34,6 +34,7 @@ from .endpoints import (
     read_board_page,
 )
 from .queue import DurableQueue, QueueRefused, _caller_key
+from .webhook import check_config as check_webhooks
 
 MAX_BODY_BYTES = 16 * 1024
 _LOG = logging.getLogger("agent_bus_mcp.remote")
@@ -275,7 +276,7 @@ def _mutate(queue: DurableQueue, config: Path, tool: str, arguments: dict) -> di
         return {"status": status, "task_id": arguments["task_id"]}
     if tool == "read_result":
         return queue.read_result(arguments["task_id"])
-    raise QueueRefused()
+    raise QueueRefused("unknown tool or bad arguments")
 
 
 @contextmanager
@@ -304,14 +305,14 @@ def _once(queue: DurableQueue, request_id: str, tool: str, arguments: dict, perf
     same idempotent operation again.
     """
     if not _caller_key(request_id):
-        raise QueueRefused()
+        raise QueueRefused("request id is invalid")
     canonical = _canonical(arguments)
     path = queue.root / "remote_calls" / str(queue.agent_id) / "results" / request_id
     with _call_lock(queue):
         if path.exists():
             record = queue._read(path)
             if record.get("tool") != tool or record.get("arguments") != canonical or type(record.get("result")) is not dict:
-                raise QueueRefused()
+                raise QueueRefused("request id does not match these arguments")
             return record["result"]
         result = perform_call()
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -422,9 +423,9 @@ class _Handler(BaseHTTPRequestHandler):
                 still_enrolled=still_enrolled,
                 peer_closed=lambda: _peer_closed(self.request),
             )
-        except QueueRefused:
+        except QueueRefused as exc:
             _LOG.info("status=refused")
-            self._json(200, {"ok": False, "error": "request refused"})
+            self._json(200, {"ok": False, "error": str(exc)})
             return
         except Exception:
             _LOG.info("status=refused")
@@ -614,6 +615,14 @@ def call_remote(
     except Exception as exc:
         raise QueueRefused() from exc
     if type(body) is not dict or body.get("ok") is not True or type(body.get("result")) is not dict:
+        error = body.get("error") if type(body) is dict else None
+        if (
+            type(error) is str
+            and error.startswith("request refused: ")
+            and "\n" not in error
+            and len(error) <= 200
+        ):
+            raise QueueRefused(error[len("request refused: "):])
         raise QueueRefused()
     return body["result"]
 
@@ -644,6 +653,10 @@ def main(argv: list[str] | None = None) -> int:
         print("tls_strict=on", file=sys.stderr)
     else:
         print("tls_strict=unavailable", file=sys.stderr)
+    try:
+        check_webhooks(Path(os.environ["AGENT_BUS_CONFIG"]))
+    except QueueRefused as exc:
+        raise SystemExit("webhook config is invalid: %s" % exc) from exc
     running = RemoteHost(
         Path(os.environ["AGENT_BUS_STATE_DIR"]),
         Path(os.environ["AGENT_BUS_CONFIG"]),

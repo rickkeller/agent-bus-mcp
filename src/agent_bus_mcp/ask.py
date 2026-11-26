@@ -11,7 +11,7 @@ from typing import Any
 import nats
 from nats import errors as nats_errors
 
-from .queue import MAX_QUESTION_BYTES, QueueRefused, _safe_text
+from .queue import MAX_QUESTION_BYTES, QueueRefused, _text_reason
 
 SUBJECT_PREFIX = "ask"
 QUEUE_GROUP = "agent-bus"
@@ -21,7 +21,7 @@ _WORK = re.compile(r"[A-Za-z0-9-]+")
 def ask_subject(work: object) -> str:
     """Return the one ask subject. work is one token of letters, digits, and hyphens."""
     if type(work) is not str or _WORK.fullmatch(work) is None:
-        raise QueueRefused()
+        raise QueueRefused("work is invalid")
     return f"{SUBJECT_PREFIX}.{work}"
 
 
@@ -35,12 +35,15 @@ def ask(url: str, *, work: object, text: object, timeout_s: object) -> dict:
     queue state: it is not a board post, a task, or a consultation.
     """
     subject = ask_subject(work)
-    if not _safe_text(text, MAX_QUESTION_BYTES) or not text.strip():
-        raise QueueRefused()
+    reason = _text_reason(text, MAX_QUESTION_BYTES, "text")
+    if reason is not None:
+        raise QueueRefused(reason)
+    if not text.strip():
+        raise QueueRefused("text is empty")
     if type(timeout_s) not in (int, float) or not math.isfinite(timeout_s) or timeout_s <= 0:
-        raise QueueRefused()
+        raise QueueRefused("timeout_s is invalid")
     if type(url) is not str or not url:
-        raise QueueRefused()
+        raise QueueRefused("ask is not configured")
     return _run(_ask_once(url, subject, text, float(timeout_s)))
 
 

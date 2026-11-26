@@ -95,8 +95,8 @@ def main(argv: list[str] | None = None) -> int:
             request_id=args.request_id,
             timeout=http_timeout,
         )
-    except QueueRefused:
-        print("request refused", file=sys.stderr)
+    except QueueRefused as exc:
+        print(exc, file=sys.stderr)
         return 2
     print(json.dumps(result, separators=(",", ":")))
     return 0

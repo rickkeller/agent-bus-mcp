@@ -132,13 +132,13 @@ def test_ask_refuses_malformed_or_oversize_values(tmp_path: Path, field: str, va
         "expires_in_seconds": 60,
     }
     arguments[field] = value
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         queue.ask_question(**arguments)  # type: ignore[arg-type]
 
 
 def test_ask_refuses_malformed_time(tmp_path: Path) -> None:
     queue = DurableQueue(tmp_path, producer_id="producer", worker_id="worker")
-    with pytest.raises(QueueRefused, match="^request refused$"):
+    with pytest.raises(QueueRefused, match="^request refused"):
         queue.ask_question(
             question="Is this bounded?",
             origin_ref="draft-2",

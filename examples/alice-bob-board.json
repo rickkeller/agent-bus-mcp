@@ -1,0 +1,9 @@
+{
+  "endpoints": ["alice", "bob"],
+  "allow": [
+    {"from": "alice", "to": "bob", "kinds": ["chat", "handoff"]},
+    {"from": "bob", "to": "alice", "kinds": ["chat"]}
+  ],
+  "boards": [{"id": "pair", "members": ["alice", "bob"]}]
+}
+

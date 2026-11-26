@@ -4,6 +4,15 @@
 
 On main after tag `v0.4.0`. That tag was not moved, and the package version is still 0.4.0.
 
+- The word filter on board posts and handed-off items is gone. A post is refused only for size, membership, an empty or bad key, or (for a handed-off item) a control character.
+- A board post may be 8192 bytes. Results, questions, and answers stay at 2048 bytes.
+- A refused tool call still uses JSON-RPC `-32600`, and the message now names the failed check, for example `request refused: text is 9140 bytes, limit is 8192` or `request refused: not a member of board room`. It never echoes the refused text. Authentication, unreadable state, and unexpected errors stay a bare `request refused`. A client that matched the exact old message must match the prefix instead.
+- A board post is now written before the NATS offer. A live answer returns `delivered` with the post id, and the post stays on the board, so it can be read, acknowledged, and promoted. This replaces the 0.4.0 behaviour where an answer left no post file. Each post also publishes a text-free wake on `wake.board.<board>`.
+- New MCP tool `wait_unread`: hold one call up to 25 seconds until this endpoint has unread posts, a claimable task, or a lease. It returns a hint only. `tools/list` now has thirteen names.
+- New `agent-bus setup`, `doctor`, `run`, and `endpoint` commands write and check a private home instead of a hand-edited env file.
+- Opt-in webhook wake. An allowlist `webhooks` block can name, per endpoint, an HTTPS URL, a signing secret file or variable, and the events `board_post` and `handoff`. After a write, a background thread sends a small JSON wake with ids and no post text, signed with HMAC-SHA256 as `sha256=<hex>` or, with `"signature_format": "stripe"`, as `t=<unix>,v1=<hex>`. The header name is configurable. 5 second timeout, three retries, bursts coalesced, the write never waits for it or fails because of it. Off without the block. See `docs/ENDPOINTS.md`.
+- Requirements BR-24 to BR-28 and TS-14 to TS-18 record these changes.
+
 - `examples/four-clients.json` and `docs/FOUR_CLIENTS.md` are an example of three endpoints and three boards. Grok Bot, Claude Code, Cursor, and Hermes Agent are clients. The endpoint ids are assistant, coder, and orchestrator. The file does not start those products.
 - A refused tool call returns the request id and no result. A request whose id cannot be read still uses a null id.
 - Sample endpoint names in the docs and examples are alice and bob. They are not installed programs.

@@ -50,7 +50,7 @@ def test_request_log_counts_tools_and_omits_the_secret(tmp_path: Path, caplog: p
         )
     assert listed[0]["status"] == 200
     assert called[0]["status"] == 200
-    assert "method=tools/list status=200 tools=12" in caplog.text
+    assert "method=tools/list status=200 tools=13" in caplog.text
     assert "method=tools/call status=200 tool=claim_task" in caplog.text
     assert "synthetic-secret" not in caplog.text
     assert "Bearer" not in caplog.text
@@ -78,6 +78,7 @@ def test_only_the_closed_task_and_consultation_tools_are_discoverable(tmp_path: 
         "read_board",
         "poll_unread",
         "ack_board",
+        "wait_unread",
         "promote_board",
         "ask",
     ]
@@ -102,7 +103,7 @@ def test_tool_descriptions_document_lease_and_terminal_contract() -> None:
     assert "exact active lease" in descriptions["answer_question"]
     assert "exactly once" in descriptions["answer_question"]
     assert "does not create a task" in descriptions["post_board"]
-    assert "2048 bytes" in descriptions["post_board"]
+    assert "8192 bytes" in descriptions["post_board"]
     assert "does not create work" in descriptions["read_board"]
     assert "authored by the bound graph endpoint" in descriptions["promote_board"]
     assert "only MCP tool that creates a task" in descriptions["promote_board"]
@@ -158,7 +159,8 @@ def test_mcp_refuses_unknown_or_malformed_tools(tmp_path: Path) -> None:
         {"name": "answer_question", "arguments": {"consultation_id": "x", "lease_id": "y", "answer": "z", "task_complete": True}},
     ):
         response = app._dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
-        assert response["error"]["message"] == "request refused"
+        assert response["error"]["code"] == -32600
+        assert response["error"]["message"] == "request refused: unknown tool or bad arguments"
 
 
 def test_mcp_uses_only_the_queue_bound_principal(tmp_path: Path) -> None:
@@ -337,6 +339,29 @@ def _call(app: MCPApplication, name: str, arguments: dict) -> dict:
     return json.loads(response[1]["body"])
 
 
+def test_board_read_ignores_extra_client_fields(tmp_path: Path) -> None:
+    state, config = _graph(tmp_path)
+    app = _member(state, config, "north")
+    response = app._dispatch(
+        {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "read_board",
+                "arguments": {"board": "room", "note": "ignored"},
+                "_meta": {"progressToken": "1"},
+            },
+        }
+    )
+    assert response is not None
+    assert response["id"] == 7
+    assert response["result"]["structuredContent"]["status"] == "ok"
+    stranger = _call(_member(state, config, "witness"), "read_board", {"board": "room"})
+    assert stranger["error"]["code"] == -32600
+    assert stranger["error"]["message"] == "request refused: not a member of board room"
+
+
 def test_graph_member_can_post_read_and_promote_without_impersonation(tmp_path: Path) -> None:
     state, config = _graph(tmp_path)
     north = _member(state, config, "north")
@@ -356,27 +381,37 @@ def test_graph_member_can_post_read_and_promote_without_impersonation(tmp_path: 
     visible = _call(south, "read_board", {"board": "room"})["result"]["structuredContent"]
     assert visible["posts"][0]["text"] == "south owns the fix"
     assert visible["posts"][0]["handoff_id"] is None
+    expected = {
+        "x": "request refused: not a member of board room",
+        "z": "request refused: board tools are not available",
+        "blank": "request refused: text is empty",
+        "long": "request refused: text is 8193 bytes, limit is 8192",
+        "path": "request refused: board is invalid",
+    }
     for app, arguments in (
         (witness, {"board": "room", "text": "no", "key": "x"}),
         (legacy, {"board": "room", "text": "no board here", "key": "z"}),
         (north, {"board": "room", "text": "   ", "key": "blank"}),
-        (north, {"board": "room", "text": "x" * 2049, "key": "long"}),
-        (north, {"board": "room", "text": "restart the agent", "key": "blocked"}),
+        (north, {"board": "room", "text": "x" * 8193, "key": "long"}),
         (north, {"board": "../room", "text": "path", "key": "path"}),
     ):
         refused = _call(app, "post_board", arguments)
         assert refused["id"] == 1
-        assert refused["error"]["message"] == "request refused"
+        assert refused["error"]["code"] == -32600
+        assert refused["error"]["message"] == expected[arguments["key"]]
         assert "result" not in refused
-    assert _call(witness, "read_board", {"board": "room"})["error"]["message"] == "request refused"
-    assert _call(legacy, "read_board", {"board": "room"})["error"]["message"] == "request refused"
+    named = _call(north, "post_board", {"board": "room", "text": "restart the agent", "key": "named"})
+    assert named["result"]["structuredContent"]["status"] == "posted"
+    assert named["result"]["structuredContent"]["text"] == "restart the agent"
+    assert _call(witness, "read_board", {"board": "room"})["error"]["message"] == "request refused: not a member of board room"
+    assert _call(legacy, "read_board", {"board": "room"})["error"]["message"] == "request refused: board tools are not available"
     spoofed = _call(
         north,
         "post_board",
         {"board": "room", "text": "pretend", "key": "spoof", "endpoint_id": "south", "author": "south"},
     )
-    assert spoofed["error"]["message"] == "request refused"
-    assert _call(south, "promote_board", {"board": "room", "post": body["post_id"], "key": "own"})["error"]["message"] == "request refused"
+    assert spoofed["error"]["message"] == "request refused: unknown tool or bad arguments"
+    assert _call(south, "promote_board", {"board": "room", "post": body["post_id"], "key": "own"})["error"]["message"] == "request refused: destination is not allowed"
     assert list((state / "tasks").glob("task_*.json")) == []
     promoted = _call(north, "promote_board", {"board": "room", "post": body["post_id"], "key": "own"})
     task_id = promoted["result"]["structuredContent"]["task_id"]
@@ -384,9 +419,9 @@ def test_graph_member_can_post_read_and_promote_without_impersonation(tmp_path: 
     again = _call(north, "promote_board", {"board": "room", "post": body["post_id"], "key": "own"})
     assert again["result"]["structuredContent"]["task_id"] == task_id
     moved = _call(north, "promote_board", {"board": "room", "post": body["post_id"], "key": "own", "to": "witness"})
-    assert moved["error"]["message"] == "request refused"
+    assert moved["error"]["message"] == "request refused: destination is not allowed"
     other = _call(north, "promote_board", {"board": "room", "post": body["post_id"], "key": "other"})
-    assert other["error"]["message"] == "request refused"
+    assert other["error"]["message"] == "request refused: promotion key or destination does not match"
     assert len(list((state / "tasks").glob("task_*.json"))) == 1
     claimed = _call(south, "claim_task", {})["result"]["structuredContent"]
     assert claimed["status"] == "claimed"
@@ -420,11 +455,16 @@ def test_read_result_allows_only_the_promoting_endpoint(tmp_path: Path) -> None:
     assert completed["status"] == "completed"
     read = _call(north, "read_result", {"task_id": task_id})["result"]["structuredContent"]
     assert read == {"task_id": task_id, "status": "completed", "result": "the fix is in"}
-    for app in (south, witness, legacy):
+    for app, message in (
+        (south, "request refused: not the promoting endpoint"),
+        (witness, "request refused: not the promoting endpoint"),
+        (legacy, "request refused"),
+    ):
         refused = _call(app, "read_result", {"task_id": task_id})
-        assert refused["error"]["message"] == "request refused"
+        assert refused["error"]["code"] == -32600
+        assert refused["error"]["message"] == message
     extra = _call(north, "read_result", {"task_id": task_id, "lease_id": "lease_x"})
-    assert extra["error"]["message"] == "request refused"
+    assert extra["error"]["message"] == "request refused: unknown tool or bad arguments"
     unknown = _call(north, "read_result", {"task_id": "task_" + "0" * 32})
     assert unknown["error"]["message"] == "request refused"
 
@@ -489,7 +529,7 @@ def test_unread_requires_an_explicit_ack_and_skips_own_posts(tmp_path: Path) -> 
     reopened = _member(state, config, "south")
     assert [item["post_id"] for item in _unread(reopened)["posts"]] == [second["post_id"]]
     mixed = _call(south, "ack_board", {"board": "room", "posts": [second["post_id"], "post_" + ("ab" * 16)]})
-    assert mixed["error"]["message"] == "request refused"
+    assert mixed["error"]["message"] == "request refused: a post is unknown"
     assert [item["post_id"] for item in _unread(south)["posts"]] == [second["post_id"]]
     assert _call(south, "ack_board", {"board": "room", "posts": [second["post_id"]]})["result"]["structuredContent"]["status"] == "acked"
     assert _unread(_member(state, config, "south"))["posts"] == []
@@ -508,10 +548,11 @@ def test_unread_requires_an_explicit_ack_and_skips_own_posts(tmp_path: Path) -> 
     assert [item["post_id"] for item in second_page["posts"]] == [third["post_id"]]
     assert [item["post_id"] for item in _unread(north)["posts"]] == [own["post_id"], third["post_id"]]
     for app in (witness, legacy):
-        assert _call(app, "poll_unread", {"board": "room"})["error"]["message"] == "request refused"
-        assert _call(app, "ack_board", {"board": "room", "posts": [own["post_id"]]})["error"]["message"] == "request refused"
-    assert _call(north, "poll_unread", {"board": "room", "endpoint_id": "south"})["error"]["message"] == "request refused"
-    assert _call(north, "ack_board", {"board": "room", "posts": []})["error"]["message"] == "request refused"
+        message = "request refused: board tools are not available" if app is legacy else "request refused: not a member of board room"
+        assert _call(app, "poll_unread", {"board": "room"})["error"]["message"] == message
+        assert _call(app, "ack_board", {"board": "room", "posts": [own["post_id"]]})["error"]["message"] == message
+    assert _call(north, "poll_unread", {"board": "room", "endpoint_id": "south"})["result"]["structuredContent"]["status"] == "ok"
+    assert _call(north, "ack_board", {"board": "room", "posts": []})["error"]["message"] == "request refused: posts are invalid"
 
 
 def test_simultaneous_posts_and_acks_do_not_drop_unread(tmp_path: Path) -> None:

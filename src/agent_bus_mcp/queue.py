@@ -31,10 +31,18 @@ _ROUTE_MODES = frozenset(("task", "consultation"))
 
 
 class QueueRefused(ValueError):
-    """Stable, content-free refusal for untrusted input or stale state."""
+    """Refusal for untrusted input or stale state.
 
-    def __init__(self) -> None:
-        super().__init__("request refused")
+    A reason names the failed check with byte counts, limits, positions, or
+    field names. It never includes secrets or the refused content. An empty
+    reason keeps the bare message ``request refused``.
+    """
+
+    def __init__(self, reason: str = "") -> None:
+        if reason:
+            super().__init__("request refused: " + reason)
+        else:
+            super().__init__("request refused")
 
 
 def _now() -> datetime:
@@ -92,11 +100,34 @@ def _public_https(value: str) -> bool:
     return "." in host
 
 
+def _text_reason(value: object, maximum_bytes: int, field: str) -> str | None:
+    """Return why text is refused, or None if it is acceptable.
+
+    The control-character position is the 0-based index in the Unicode string,
+    not a UTF-8 byte offset. The reason never includes the text itself.
+    """
+    if not isinstance(value, str):
+        return f"{field} must be a string"
+    if not value:
+        return f"{field} is empty"
+    size = len(value.encode())
+    if size > maximum_bytes:
+        return f"{field} is {size} bytes, limit is {maximum_bytes}"
+    for index, character in enumerate(value):
+        if character not in "\n\r\t" and unicodedata.category(character).startswith("C"):
+            return f"contains a control character at position {index}"
+    return None
+
+
 def _safe_text(value: object, maximum_bytes: int) -> bool:
     """Bound text and refuse control characters except ordinary layout whitespace."""
-    if not isinstance(value, str) or not value or len(value.encode()) > maximum_bytes:
-        return False
-    return all(character in "\n\r\t" or not unicodedata.category(character).startswith("C") for character in value)
+    return _text_reason(value, maximum_bytes, "text") is None
+
+
+def _require_text(value: object, maximum_bytes: int, field: str) -> None:
+    reason = _text_reason(value, maximum_bytes, field)
+    if reason is not None:
+        raise QueueRefused(reason)
 
 
 def _identifier(value: str, prefix: str) -> bool:
@@ -379,7 +410,7 @@ class DurableQueue:
             or not _identity(destination)
             or not self.policy.allows(self._source_id, destination, mode)
         ):
-            raise QueueRefused()
+            raise QueueRefused("destination is not allowed")
         return destination
 
     def _idempotency_path(self, directory: str, destination: str, key: str) -> Path:
@@ -421,14 +452,23 @@ class DurableQueue:
     ) -> str:
         producer = self._source_id
         destination = self._destination(destination_id, "task")
-        if (not _safe_text(goal, MAX_GOAL_BYTES) or
-                not isinstance(references, list) or len(references) > MAX_REFERENCES or
-                not all(isinstance(item, str) and _public_https(item) for item in references) or
-                not isinstance(idempotency_key, str) or idempotency_key in (".", "..") or not idempotency_key or len(idempotency_key) > 160):
-            raise QueueRefused()
+        _require_text(goal, MAX_GOAL_BYTES, "goal")
+        if (
+            not isinstance(references, list)
+            or len(references) > MAX_REFERENCES
+            or not all(isinstance(item, str) and _public_https(item) for item in references)
+        ):
+            raise QueueRefused("references are invalid")
+        if (
+            not isinstance(idempotency_key, str)
+            or idempotency_key in (".", "..")
+            or not idempotency_key
+            or len(idempotency_key) > 160
+        ):
+            raise QueueRefused("key is invalid")
         with self._locked():
             if not all(char.isalnum() or char in "._-" for char in idempotency_key):
-                raise QueueRefused()
+                raise QueueRefused("key is invalid")
             key_path = self._idempotency_path("idempotency", destination, idempotency_key)
             legacy_key_path = self.root / "idempotency" / idempotency_key
             if self._legacy_pair and legacy_key_path.exists():
@@ -547,18 +587,21 @@ class DurableQueue:
         """Create an advice-only consultation from the configured local producer."""
         producer = self._source_id
         destination = self._destination(destination_id, "consultation")
+        _require_text(question, MAX_QUESTION_BYTES, "question")
+        _require_text(origin_ref, MAX_ORIGIN_REF_BYTES, "origin_ref")
         if (
-            not _safe_text(question, MAX_QUESTION_BYTES)
-            or not _safe_text(origin_ref, MAX_ORIGIN_REF_BYTES)
-            or not isinstance(idempotency_key, str)
+            not isinstance(idempotency_key, str)
             or idempotency_key in ("", ".", "..")
             or len(idempotency_key) > 160
             or not all(char.isalnum() or char in "._-" for char in idempotency_key)
-            or not isinstance(expires_in_seconds, int)
+        ):
+            raise QueueRefused("key is invalid")
+        if (
+            not isinstance(expires_in_seconds, int)
             or isinstance(expires_in_seconds, bool)
             or not 1 <= expires_in_seconds <= MAX_CONSULTATION_SECONDS
         ):
-            raise QueueRefused()
+            raise QueueRefused("expires_in_seconds is invalid")
         instant = _instant(now)
         with self._locked():
             key_path = self._idempotency_path(
@@ -604,12 +647,12 @@ class DurableQueue:
             not isinstance(consultation_id, str)
             or not _identifier(consultation_id, _CONSULTATION_PREFIX)
         ):
-            raise QueueRefused()
+            raise QueueRefused("consultation id is invalid")
         instant = _instant(now)
         with self._locked():
             record = self._read(self._consultation_path(consultation_id))
             if record.get("producer_id") != producer:
-                raise QueueRefused()
+                raise QueueRefused("consultation is not readable by this endpoint")
             if record.get("status") in ("pending", "leased") and _parse_stamp(record.get("expires_at")) <= instant:
                 record["status"] = "expired"
                 self._write(self._consultation_path(consultation_id), record)
@@ -676,11 +719,11 @@ class DurableQueue:
         if (
             not isinstance(consultation_id, str)
             or not _identifier(consultation_id, _CONSULTATION_PREFIX)
-            or not isinstance(lease_id, str)
-            or not _identifier(lease_id, _LEASE_PREFIX)
-            or not _safe_text(answer, MAX_ANSWER_BYTES)
         ):
-            raise QueueRefused()
+            raise QueueRefused("consultation id is invalid")
+        if not isinstance(lease_id, str) or not _identifier(lease_id, _LEASE_PREFIX):
+            raise QueueRefused("lease id is invalid")
+        _require_text(answer, MAX_ANSWER_BYTES, "answer")
         instant = _instant(now)
         with self._locked():
             record = self._read(self._consultation_path(consultation_id))
@@ -688,14 +731,14 @@ class DurableQueue:
             if expires_at <= instant and record.get("status") in ("pending", "leased"):
                 record["status"] = "expired"
                 self._write(self._consultation_path(consultation_id), record)
-                raise QueueRefused()
+                raise QueueRefused("consultation has expired")
             if (
                 record.get("worker_id") != worker
                 or record.get("status") != "leased"
                 or record.get("lease_id") != lease_id
                 or _parse_stamp(record.get("lease_expires_at")) <= instant
             ):
-                raise QueueRefused()
+                raise QueueRefused("lease is stale or mismatched")
             record["status"] = "answered"
             record["answer"] = answer
             record["answered_at"] = _stamp(instant)
@@ -780,22 +823,23 @@ class DurableQueue:
 
     def finish(self, *, task_id: str, lease_id: str, result: str | None, failed: bool, now: datetime | None = None) -> str:
         worker = self._worker_id
-        if (not isinstance(task_id, str) or not isinstance(lease_id, str) or
-                not _identifier(task_id, _TASK_PREFIX) or not _identifier(lease_id, _LEASE_PREFIX)):
-            raise QueueRefused()
-        if not failed and not _safe_text(result, MAX_RESULT_BYTES):
-            raise QueueRefused()
+        if not isinstance(task_id, str) or not _identifier(task_id, _TASK_PREFIX):
+            raise QueueRefused("task id is invalid")
+        if not isinstance(lease_id, str) or not _identifier(lease_id, _LEASE_PREFIX):
+            raise QueueRefused("lease id is invalid")
+        if not failed:
+            _require_text(result, MAX_RESULT_BYTES, "result")
         with self._locked():
             task = self._read(self._path(task_id))
             if task.get("worker_id") != worker:
-                raise QueueRefused()
+                raise QueueRefused("task is not assigned to this endpoint")
             if task["status"] in ("completed", "failed"):
                 if task["lease_id"] == lease_id:
                     return f"already_{task['status']}"
-                raise QueueRefused()
+                raise QueueRefused("lease is stale or mismatched")
             instant = _instant(now)
             if task["status"] != "leased" or task["lease_id"] != lease_id or _parse_stamp(task.get("lease_expires_at")) <= instant:
-                raise QueueRefused()
+                raise QueueRefused("lease is stale or mismatched")
             task["status"] = "failed" if failed else "completed"
             task["result"] = None if failed else result
             self._write(self._path(task_id), task)
@@ -804,11 +848,11 @@ class DurableQueue:
 
     def read_task(self, task_id: str) -> dict:
         if not isinstance(task_id, str) or not _identifier(task_id, _TASK_PREFIX):
-            raise QueueRefused()
+            raise QueueRefused("task id is invalid")
         with self._locked():
             task = self._read(self._path(task_id))
             if task.get("producer_id") != self._source_id:
-                raise QueueRefused()
+                raise QueueRefused("task is not readable by this endpoint")
             return task
 
     def read_result(self, task_id: str) -> dict:
@@ -821,11 +865,13 @@ class DurableQueue:
         acknowledge, or mutate the task, and it is not part of wait hints.
         """
         if not isinstance(task_id, str) or not _identifier(task_id, _TASK_PREFIX):
-            raise QueueRefused()
+            raise QueueRefused("task id is invalid")
         with self._locked():
             task = self._read(self._path(task_id))
-            if not _claimed_board(task) or task.get("producer_id") != self._source_id:
-                raise QueueRefused()
+            if not _claimed_board(task):
+                raise QueueRefused("task was not promoted from a board")
+            if task.get("producer_id") != self._source_id:
+                raise QueueRefused("not the promoting endpoint")
             return {"task_id": task_id, "status": task["status"], "result": task.get("result")}
 
     def submit_coding_request(
@@ -861,14 +907,14 @@ class DurableQueue:
             or len(idempotency_key) > 160
             or not all(char.isalnum() or char in "._-" for char in idempotency_key)
         ):
-            raise QueueRefused()
+            raise QueueRefused("key is invalid")
         with self._locked():
             key_path = self._idempotency_path("idempotency", destination, idempotency_key)
             if not key_path.is_file():
-                raise QueueRefused()
+                raise QueueRefused("key is unknown")
             task_id = self._read(key_path).get("task_id")
         if not isinstance(task_id, str):
-            raise QueueRefused()
+            raise QueueRefused("key is unknown")
         return self.read_task(task_id)
 
     def inspect(self, task_id: str) -> dict:

@@ -57,7 +57,7 @@ The remote contract is at least once, plus idempotent mutations. It is not exact
 
 These operations already have a domain key and must return the original result when repeated:
 
-- `post_board` with the same endpoint and key returns the original result and does not create a second post or a task. If a subscriber took that key, the result is `delivered` and there is still no post file.
+- `post_board` with the same endpoint and key returns the original result and does not create a second post or a task. If a live listener answered for that key, the result is `delivered`, with the same post id.
 - `promote_board` with the same key and the same destination returns the original handoff. The same key with a different destination stays a refusal.
 - `ack_board` of an id that is already acknowledged is a stable success. A call that names any unknown id changes nothing.
 
@@ -88,7 +88,7 @@ A connected client can hold `wait_available` instead of sleeping between polls. 
 | Operator of the primary | Read and restore the state directory | Treating a partial restore as consistent |
 | Second host process | Try to serve the same directory | Becoming a writer without the single primary lock |
 
-Refusals stay generic. Logs omit tokens, keys, post text, and task bodies. Page size, body size, and the existing text caps stay in force so one member cannot stream an unbounded board. The host is not a public internet service. A TLS reverse proxy in front of a loopback port is the current local rule; a remote listener is a later stage and is still not opened by this repository.
+A refused tool check names the failed limit, position, or field; it does not echo tokens, keys, post text, or task bodies. Authentication, revocation, a closed TLS wait, and unreadable stored state stay a bare `request refused`. Logs omit tokens, keys, post text, and task bodies. Page size, body size, and the existing text caps stay in force so one member cannot stream an unbounded board. The host is not a public internet service. A TLS reverse proxy in front of a loopback port is the current local rule; a remote listener is a later stage and is still not opened by this repository.
 
 Split brain is the failure this design refuses to paper over. If the primary's disk is copied to a second machine and both serve, two members can promote the same post or complete the same lease. The first remote stage has one writer. A fencing token for failover is future work, and it is not invented here.
 
@@ -133,7 +133,7 @@ Items 1 through 6 are in the automated suite, including `tests/test_remote.py`. 
 
 1. Keep the current local suite green, including member isolation, author-only promote, and explicit ack.
 2. Two credentials against one host: each can post only as itself; a non-member is refused; a body that names the other endpoint is refused.
-3. Drop the response to `post_board` and retry the same key. One result exists. If a subscriber took that key, there is still no post file.
+3. Drop the response to `post_board` and retry the same key. One result exists, with one post id.
 4. Drop the response to `claim_task`, resume, and receive the same lease. The other endpoint cannot finish it.
 5. Acknowledge one post, disconnect, and poll. That post stays acknowledged and an unacknowledged post is still returned. An own post is absent for its author and present for the other member.
 6. Start a second writer on the same directory. It refuses while the primary holds the directory.

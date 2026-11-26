@@ -39,6 +39,16 @@ def _pair(tmp_path: Path) -> Path:
     )
 
 
+def test_a_post_may_be_8192_bytes_and_one_more_is_refused(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    config = _pair(tmp_path)
+    alice = open_endpoint(state, config, "alice")
+    posted = post_board(alice, config=config, board="pair", text="x" * 8192, key="fit")
+    assert posted["seq"] == 1
+    with pytest.raises(QueueRefused, match=r"^request refused: text is 8193 bytes, limit is 8192$"):
+        post_board(alice, config=config, board="pair", text="x" * 8193, key="over")
+
+
 def test_pair_talk_does_not_own_work(tmp_path: Path) -> None:
     config = _pair(tmp_path)
     state = tmp_path / "state"
@@ -50,9 +60,9 @@ def test_pair_talk_does_not_own_work(tmp_path: Path) -> None:
     assert read[0]["text"] == "what should own this"
     assert read[0]["handoff_id"] is None
     assert list((state / "tasks").glob("task_*.json")) == []
-    with pytest.raises(QueueRefused):
+    with pytest.raises(QueueRefused, match=r"^request refused: not a member of board pair$"):
         read_board(open_endpoint(state, config, "stranger"), config=config, board="pair")
-    with pytest.raises(QueueRefused):
+    with pytest.raises(QueueRefused, match=r"^request refused: not a member of board pair$"):
         post_board(open_endpoint(state, config, "carol"), config=config, board="pair", text="no", key="no")
 
 

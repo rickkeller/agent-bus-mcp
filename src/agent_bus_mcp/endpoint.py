@@ -17,6 +17,7 @@ from .endpoints import (
     read_accepted,
     read_board,
 )
+from . import webhook
 from .queue import QueueRefused
 
 
@@ -125,10 +126,13 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             raise QueueRefused()
-    except QueueRefused:
-        print("request refused", file=sys.stderr)
+    except QueueRefused as exc:
+        print(exc, file=sys.stderr)
         return 2
-    print(json.dumps(result, separators=(",", ":")))
+    print(json.dumps(result, separators=(",", ":")), flush=True)
+    # A one-shot command exits after printing; give queued webhook wakes a
+    # bounded chance to go out. The write is already done either way.
+    webhook.flush()
     return 0
 
 

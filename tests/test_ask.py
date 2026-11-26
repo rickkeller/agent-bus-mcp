@@ -2,12 +2,9 @@
 
 import asyncio
 import json
-import shutil
 import socket
-import subprocess
 import threading
 import time
-from collections.abc import Iterator
 from pathlib import Path
 
 import nats
@@ -17,43 +14,6 @@ from agent_bus_mcp.ask import QUEUE_GROUP, ask, ask_subject
 from agent_bus_mcp.endpoints import open_endpoint
 from agent_bus_mcp.mcp import MCPApplication, TOOLS
 from agent_bus_mcp.queue import DurableQueue, QueueRefused
-
-SERVER = Path(shutil.which("nats-server") or "")
-
-
-@pytest.fixture()
-def nats_server() -> Iterator[str]:
-    """Start the local server binary on one free loopback port, then stop it."""
-    if not SERVER.is_file():
-        pytest.skip("nats-server is not on PATH")
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = int(probe.getsockname()[1])
-    process = subprocess.Popen(
-        [str(SERVER), "-a", "127.0.0.1", "-p", str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        deadline = time.monotonic() + 10
-        while True:
-            if process.poll() is not None:
-                raise AssertionError("the NATS server exited before accepting connections")
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                    break
-            except OSError:
-                if time.monotonic() > deadline:
-                    raise AssertionError("the NATS server did not start")
-                time.sleep(0.05)
-        yield f"nats://127.0.0.1:{port}"
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
 
 
 class _Listener:
@@ -253,8 +213,18 @@ def test_the_ask_tool_reports_no_responders_and_timeout(tmp_path: Path, nats_ser
         silent.stop()
 
 
-def test_the_ask_tool_refuses_other_shapes_and_values(tmp_path: Path, nats_server: str) -> None:
-    configured = MCPApplication(DurableQueue(tmp_path / "state", producer_id="producer", worker_id="worker"), "synthetic-secret", None, nats_server)
+def test_the_ask_tool_refuses_other_shapes_and_values(tmp_path: Path) -> None:
+    configured = MCPApplication(DurableQueue(tmp_path / "state", producer_id="producer", worker_id="worker"), "synthetic-secret", None, "nats://127.0.0.1:4222")
+    expected = {
+        ("a.b", "hi", 1): "request refused: work is invalid",
+        ("north south", "hi", 1): "request refused: work is invalid",
+        ("alpha", "hi", 0): "request refused: timeout_s is invalid",
+        ("alpha", "hi", -2): "request refused: timeout_s is invalid",
+        ("alpha", "hi", "1"): "request refused: timeout_s is invalid",
+        ("alpha", "hi", True): "request refused: timeout_s is invalid",
+        ("alpha", "", 1): "request refused: text is empty",
+        ("alpha", "x" * 2049, 1): "request refused: text is 2049 bytes, limit is 2048",
+    }
     for arguments in (
         {"work": "a.b", "text": "hi", "timeout_s": 1},
         {"work": "north south", "text": "hi", "timeout_s": 1},
@@ -269,7 +239,11 @@ def test_the_ask_tool_refuses_other_shapes_and_values(tmp_path: Path, nats_serve
         {},
     ):
         refused = _call(configured, "ask", arguments)
-        assert refused["error"]["message"] == "request refused"
+        assert refused["error"]["code"] == -32600
+        if set(arguments) != {"work", "text", "timeout_s"}:
+            assert refused["error"]["message"] == "request refused: unknown tool or bad arguments"
+        else:
+            assert refused["error"]["message"] == expected[(arguments["work"], arguments["text"], arguments["timeout_s"])]
     unconfigured = MCPApplication(DurableQueue(tmp_path / "other", producer_id="producer", worker_id="worker"), "synthetic-secret")
     without_server = _call(unconfigured, "ask", {"work": "alpha", "text": "hi", "timeout_s": 1})
-    assert without_server["error"]["message"] == "request refused"
+    assert without_server["error"]["message"] == "request refused: ask is not configured"

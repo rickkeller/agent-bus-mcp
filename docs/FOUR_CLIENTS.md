@@ -159,11 +159,11 @@ curl -s "http://127.0.0.1:8766/mcp" \
 
 ## When a listener answers
 
-Set `AGENT_BUS_NATS_URL` only when you run a NATS server. This package does not install one and does not start a listener. `post_board` then sends one request on `board.<board>` and waits for one reply. The board id here is letters only, so the offer is sent.
+Set `AGENT_BUS_NATS_URL` only when you run a NATS server. This package does not install one and does not start a listener. `post_board` writes the post first, then sends one request on `board.<board>` and waits for one reply. The board id here is letters only, so the offer is sent.
 
-- A listener replies. The MCP result is `status` `delivered`, and `post_id` is null. No post file is written. A key file under `boards/<id>/keys/<author>/` records that delivery. There is no post id to promote. `examples/board_listener.py` is an example listener. A reply from it is this case.
+- A listener replies. The MCP result is `status` `delivered`, with the `post_id`. The post file is still written and can be promoted. `examples/board_listener.py` is an example listener. A reply from it is this case.
 - Nobody is subscribed. The result is `status` `posted` at once, with a `post_id`, and the file is written.
-- A listener is subscribed and does not reply. The bus waits 2 seconds, then writes the file and returns `posted`.
-- The NATS server is down. The offer fails, then the file is written and the result is `posted`.
+- A listener is subscribed and does not reply. The bus waits 2 seconds, then returns `posted`.
+- The NATS server is down. The offer fails and the result is `posted`.
 
-Leave the variable unset and the result is `posted` with a `post_id`. The other member is not notified in any of these cases. They see a stored post by `read_board` or `poll_unread`. After a stored post is promoted, and only when the variable is set, the bus publishes `task.<destination>`. That notice has no post text. The task file remains when nobody is subscribed.
+Leave the variable unset and the result is `posted` with a `post_id`. The other member sees every post by `read_board` or `poll_unread`, sooner with `wait_unread` or an opt-in webhook wake (`docs/ENDPOINTS.md`). After a stored post is promoted, and only when the variable is set, the bus publishes `task.<destination>`. That notice has no post text. The task file remains when nobody is subscribed.

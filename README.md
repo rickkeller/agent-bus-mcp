@@ -6,7 +6,7 @@ The requirements and the technical specification are `docs/REQUIREMENTS.md`. Rea
 
 A small, local, authenticated [MCP](https://modelcontextprotocol.io) server that lets one AI agent hand **bounded tasks** and **quick advice-only questions** to other agents. Everything goes through a durable on-disk queue. A local producer creates the work, and a worker agent connects over MCP to claim it and answer it.
 
-> **Status: 0.4.0.** This is the local durable core, plus an optional NATS offer before a board post is written, and one optional NATS request/reply ask. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
+> **Status: 0.4.0.** This is the local durable core, plus an optional NATS live offer after a board post is written, an optional NATS request/reply ask, and an opt-in signed webhook wake. Main after the `v0.4.0` tag adds the post-first write, `wait_unread`, 8192-byte posts, named refusal reasons, and the webhook wake; see `CHANGELOG.md`. It doesn't do network federation, service discovery or replicated storage. Don't treat it as a production service, and don't point a live worker at it until you've reviewed [SECURITY.md](SECURITY.md).
 
 ## Start here
 
@@ -83,30 +83,34 @@ A graph-bound server can also `post_board`, `read_board`, and `promote_board` as
 
 ## How the other side sees a post
 
-Without `AGENT_BUS_NATS_URL`, the post is a file under `boards/<id>/posts/`. That write is the whole delivery. The bus does not send south a message. It does not start south. It does not open a connection to south. South learns about the post by calling `read_board` or `poll_unread` (or `read-board` on the command line). South then calls `ack_board` with those post ids.
+Every post is first written as a file under `boards/<id>/posts/`, with a post id and a seq. That write is the delivery that always happens. On its own, the bus does not send south a message, start south, or open a connection to south. South learns about the post by calling `read_board` or `poll_unread` (or `read-board` on the command line), then calls `ack_board` with those post ids.
 
-A client that is already connected to the TLS host can hold `wait_available`. The call returns a hint that something changed. The hint is not the post text. A program that is not connected gets nothing. The host does not start it. See `docs/REMOTE.md`. The commands in Start here have no such waiter.
+Three optional ways tell south sooner:
 
-With `AGENT_BUS_NATS_URL` set, `post_board` first sends one NATS request on the subject `board.<board>`. The body is JSON: `kind`, `board`, `author`, `text`, and `key`. The bus waits for one reply. One reply ends the offer. This is request/reply with that listener. It is not a broadcast to the other board member, and it does not start that member.
+- **Hold a wait.** A connected MCP client can call `wait_unread`, and a client of the TLS host can hold `wait_available`. The call returns a hint (board names and two flags), not the post text, as soon as something changes, and otherwise rechecks at least every five seconds. See `docs/REMOTE.md`.
+- **NATS.** With `AGENT_BUS_NATS_URL` set, see below.
+- **Webhook.** An endpoint that cannot hold a wait open can be woken by a signed HTTPS request. See [Optional webhook wake](#optional-webhook-wake).
 
-- A listener replies. The MCP result is `status` `delivered`, and `post_id` is null. The command `post-board` prints `"delivered":"nats"` and `post_id` null. No post file is written. A key file under `boards/<id>/keys/<author>/` records that delivery so the same key is not offered again. The `posts/` folder is not created. The listener has the text. South's read and poll do not show it. There is no post id to promote.
-- The server is up and nobody is subscribed. The server reports no responders at once. The bus writes the file and the MCP result is `status` `posted`. The end result matches leaving `AGENT_BUS_NATS_URL` unset: a file, and no message to south. This case does not wait 2 seconds.
-- A listener is subscribed and does not reply. The bus waits 2 seconds, then writes the file. That listener already has the request body. South's process is still not started, and south is not notified.
-- The NATS server is down. The offer fails in well under a second, then the file is written. South is not notified.
+With `AGENT_BUS_NATS_URL` set, after the file is written `post_board` sends one NATS request on the subject `board.<board>`. The body is JSON: `kind`, `board`, `author`, `text`, `key`, `post_id`, and `seq`. The bus waits for one reply. This is request/reply with that listener. It is not a broadcast, and it does not start the other member.
 
-A listener that starts later does not receive the offer. The offer is not stored on the NATS server. Read the file.
+- A listener replies. The MCP result is `status` `delivered`, with the post id. The post is still on the board, so south's read and poll show it, and it can be promoted. A listener that also polls should drop duplicates by post id. Replying does not acknowledge for anyone.
+- The server is up and nobody is subscribed. The server reports no responders at once, and the result is `status` `posted`. This case does not wait 2 seconds.
+- A listener is subscribed and does not reply. The bus waits 2 seconds, then returns `posted`. That listener already has the request body.
+- The NATS server is down. The offer fails in well under a second and the result is `posted`.
 
-The same key is not offered twice. A key that was delivered stays delivered, with no file. Use a new key for a new post.
+Either way the bus then publishes one wake on `wake.board.<board>` with the board, post id, author, and seq, and no text. A parked `wait_unread` on the same server returns at once on that wake.
 
-The board id is sent on the subject only when it is letters, digits, and hyphens. `room` is sent. An underscore in the id skips the offer, and the post is written to the file.
+A listener that starts later does not receive the offer. The offer is not stored on the NATS server. Read the board.
+
+The same key is not offered twice. It returns the saved result. Use a new key for a new post.
+
+The board id is sent on the subject only when it is letters, digits, and hyphens. `room` is sent. An underscore in the id skips the offer, and the post is still written.
 
 Two programs can both subscribe to `board.>`. Unless they share a queue group, the NATS server delivers that one request to each of them. This package keeps the first reply and ignores a later one. The board offer does not set a queue group. Run one listener. The `ask` tool is a different subject. Its queue group is under [Optional NATS ask](#optional-nats-ask).
 
-This package does not wake a stopped agent. A program sees the offer only while that program is already running and subscribed. If you want the listener to launch another agent, that launch is yours.
+NATS does not wake a stopped agent. A program sees the offer only while it is already running and subscribed. The webhook wake is the opt-in way to reach an agent that is not running a listener.
 
 Promotion is the publish. After the task file is written, and only when `AGENT_BUS_NATS_URL` is set, the bus publishes one notice on `task.<destination>`. Any program already subscribed to that subject can receive it. No reply is required. The notice is JSON with `kind`, `board`, `post_id`, `task_id`, and `destination`. It does not include the post text. If nobody is subscribed, the notice is discarded. The task file remains. A missing server does not fail the promotion. The destination still claims the handoff. The notice does not claim it and does not start a program.
-
-Only a stored post can be promoted. A delivered offer has no post id.
 
 ## Any agent can use the board
 
@@ -150,7 +154,7 @@ export AGENT_BUS_NATS_URL=nats://127.0.0.1:4222
 python examples/board_listener.py
 ```
 
-Start it before you post. It subscribes to `board.>` and replies to each request, so the post is `delivered` and no post file is written. The script prints the request, including the text. It also prints `task.>` notices and does not reply to them, because those notices are publishes. Stop the script when you want the file. With the server up and this script stopped, a post is written to the file, the same end result as leaving the variable unset.
+Start it before you post. It subscribes to `board.>` and replies to each request, so the result is `delivered`. The post is still written either way. The script prints the request, including the text. It also prints `task.>` notices and does not reply to them, because those notices are publishes. With the server up and this script stopped, the result is `posted`.
 
 ## Chat only: alice and bob
 
@@ -209,6 +213,19 @@ python3 -m venv .venv
 python -m pip install -e '.[test]'
 ```
 
+## Setup
+
+`agent-bus setup` writes one home, a mode-600 env file, a bearer token, and a starter allowlist. It does not overwrite an env file that is already there, and it does not print the token. `agent-bus doctor` reads the file and prints pass or fail with the fix. `agent-bus run` loads that file and starts the loopback server.
+
+```sh
+agent-bus setup
+agent-bus doctor
+agent-bus run
+agent-bus endpoint bob post-chat --to alice --text "what version are you on" --key once
+```
+
+The home is `~/.agent-bus`, or the directory in `AGENT_BUS_HOME`. If that home does not exist yet and you already have `~/.config/agent-bus-mcp/env`, doctor reads the file you created by hand. The sections below are those same settings, written out by hand.
+
 ## Configuration
 
 The MCP process is selected by environment variables. Endpoints, chat, handoff, and any board live in a JSON allowlist, not in these variables. `.env.example` lists the simple pair, which has no board. Copy it to a private file outside the repo:
@@ -237,13 +254,17 @@ The simple pair is one producer and one worker, set with `AGENT_BUS_PRODUCER_ID`
 
 ## Optional NATS offer
 
-Behavior, server commands, and the example listener are in [How the other side sees a post](#how-the-other-side-sees-a-post) and [Run a NATS server](#run-a-nats-server). Leave `AGENT_BUS_NATS_URL` unset and a board post is only a file. The other member is not notified. A client that requires a post id must treat `delivered` as taken. That result has no post id, and no post file was written.
+Behavior, server commands, and the example listener are in [How the other side sees a post](#how-the-other-side-sees-a-post) and [Run a NATS server](#run-a-nats-server). Leave `AGENT_BUS_NATS_URL` unset and a board post is only a file. The other member is not notified unless it holds `wait_unread` on the same door or has a webhook wake. `delivered` and `posted` both carry a post id, and both posts are on the board.
 
 ## Optional NATS ask
 
 `ask` is not part of the install above. This package does not install a NATS server, and it does not start a program that answers questions.
 
 Run a NATS server yourself. Set `AGENT_BUS_NATS_URL` to it. A separate program you run must subscribe to `ask.>` and reply. Use the queue group `agent-bus` if more than one listener should still produce one answer. Then call the MCP tool `ask` with `work`, `text`, and `timeout_s`. `work` is one token of letters, digits, and hyphens. Nobody listening returns `no_responders` at once. The call does not create a board post, a task, or a consultation.
+
+## Optional webhook wake
+
+An endpoint that cannot hold a listener open (for example a hosted assistant started only by an HTTPS request) can opt in to a signed webhook wake on new board posts and handoffs. The wake carries ids, never the post text, and is signed with HMAC-SHA256 in the default `sha256=` form or a Stripe-style `t=,v1=` form. It is off unless the allowlist has a `webhooks` block. See [Wake a remote agent with a webhook](docs/ENDPOINTS.md#wake-a-remote-agent-with-a-webhook).
 
 ## Quickstart
 
@@ -301,7 +322,7 @@ This quickstart is the simple producer and worker pair. It has no board. Board p
 | `install an ASGI server to run the bridge` | `uvicorn` isn't installed in this environment. Re-run `pip install -e .`. |
 | HTTP 401 with an empty body | The `Authorization: Bearer …` header is missing or wrong, or the request wasn't a `POST` to exactly `/mcp`. |
 | `claim_task` returns `{"status": "empty"}` | No task is waiting for this worker. Check that the producer used the same state dir and IDs. |
-| `request refused` on a board post | This process is not a member of that board, or the config has no `boards` entry. `examples/alice-bob.json` has no board. The simple pair refuses board tools. |
+| `request refused: not a member of board …` | This process is not a member of that board, or the config has no `boards` entry. `examples/alice-bob.json` has no board. The simple pair refuses board tools. A refused tool call names the failed check, for example `text is 9140 bytes, limit is 8192`. A bare `request refused` means authentication, unreadable state, or an unexpected error. |
 | `QueueRefused` from Python | The input broke a limit: an ID or route not in the policy, a non-HTTPS reference, more than 4 references, or text that is too long or has control characters. |
 | My MCP client can't connect | The server is stateless POST-only JSON-RPC, with no SSE and no sessions. Some clients need Streamable HTTP with SSE. |
 
@@ -326,11 +347,11 @@ Agent Bus MCP is a small, vendor-neutral, MIT-licensed Python package. `RoutePol
 
 Task and consultation records use separate directories. Idempotency is namespaced by mode, source, and destination. A single process lock, atomic JSON replacement, file and directory `fsync`, expiring leases, and lease fencing make state transitions durable and predictable.
 
-The MCP worker surface exposes twelve tools:
+The MCP worker surface exposes thirteen tools:
 
 - `claim_task`, `complete_task`, `fail_task`, and `read_result` for formal work. `read_result` returns one promoted task's status and stored result only to the endpoint that promoted the post which created that task. Every other endpoint is refused. A task that was not promoted from a board is refused. The result text is not part of `wait_available`.
 - `claim_question` and `answer_question` for advice-only consultations.
-- `post_board`, `read_board`, `poll_unread`, `ack_board`, and `promote_board` for a graph-bound member. A board post is at most 2048 bytes. With `AGENT_BUS_NATS_URL` unset, the post is a file and the other member is not notified. With it set, the text is one request on `board.<board>` first. A reply returns `delivered` and writes no post file. Nobody subscribed returns `posted` at once and writes the file. A silent subscriber waits 2 seconds, then the file is written. A missing server writes the file. Reading and polling do not acknowledge. Own posts are not unread. `ack_board` names the posts that stop being unread. Each page has at most 20 posts. The simple pair refuses these five.
+- `post_board`, `read_board`, `poll_unread`, `ack_board`, `wait_unread`, and `promote_board` for a graph-bound member. A board post is at most 8192 bytes and is always written: a live NATS answer marks it delivered but never removes it. A refused tool call keeps JSON-RPC code `-32600` and names the failed check; it does not echo the refused text. Reading and polling do not acknowledge. Own posts are not unread. `ack_board` names the posts that stop being unread. Each page has at most 20 posts. `wait_unread` holds one call up to 25 seconds for a hint of unread boards, a claimable task, or a held lease; it never reads, acks, or claims. With `AGENT_BUS_NATS_URL` set, the written text is also offered once on `board.<board>`; a live answer returns `delivered` with the same post id, and nobody listening, a timeout, or a missing server returns `posted`. The simple pair refuses these six.
 - `ask` sends one question on subject `ask.<work>` over NATS request/reply and waits for one answer. It needs `AGENT_BUS_NATS_URL`. It does not create a board post, a task, or a consultation. A spaced work name is refused. Nobody listening returns `no_responders` at once.
 
 Each bearer-authenticated `MCPApplication` wraps one principal-bound queue object. MCP calls cannot choose or override source, worker, agent, or author identities. No tool fetches URLs, opens files, runs a shell command, or routes to another worker. A consultation or an ordinary task is still created only by the local process. `promote_board` is the one MCP call that creates a task, and only from a post that bound endpoint authored.
@@ -393,7 +414,7 @@ queue = DurableQueue(
 
 When an older state directory has records but no `policy.json`, the first graph-mode open admits it only if every stored task edge allows `task` and every stored consultation edge allows `consultation`. Any absent edge or mode refuses the whole open before policy creation or record mutation. A fresh install has no such directory.
 
-`claim_question` returns `status=empty` or a claimed question with its `consultation_id`, `origin_ref`, `question`, consultation expiry, lease ID, and lease expiry. A lease lasts at most 900 seconds and never extends beyond the question expiry. An expired lease may be reclaimed with a new fence while the question remains live. `answer_question` requires the exact live lease and one bounded answer. Wrong identities or leases, expired questions or leases, and every second answer are refused without revealing details.
+`claim_question` returns `status=empty` or a claimed question with its `consultation_id`, `origin_ref`, `question`, consultation expiry, lease ID, and lease expiry. A lease lasts at most 900 seconds and never extends beyond the question expiry. An expired lease may be reclaimed with a new fence while the question remains live. `answer_question` requires the exact live lease and one bounded answer. Wrong identities or leases, expired questions or leases, and every second answer are refused. The error names the failed check and does not include the refused text.
 
 ### Formal task API
 
@@ -403,7 +424,7 @@ A bound local producer calls `enqueue` with a policy-allowed `destination_id`, a
 
 ### Protocol boundary
 
-The authenticated endpoint is stateless `POST /mcp` JSON-RPC. It accepts one request per POST and rejects batches. Notifications without an `id` receive HTTP 202 with an empty body. A valid bearer on `GET /mcp` receives HTTP 405 with `Allow: POST`. A missing or wrong bearer is still HTTP 401. It supports `initialize`, `ping`, `tools/list`, and calls to the twelve tools above.
+The authenticated endpoint is stateless `POST /mcp` JSON-RPC. It accepts one request per POST and rejects batches. Notifications without an `id` receive HTTP 202 with an empty body. A valid bearer on `GET /mcp` receives HTTP 405 with `Allow: POST`. A missing or wrong bearer is still HTTP 401. It supports `initialize`, `ping`, `tools/list`, and calls to the thirteen tools above.
 
 This is intentionally not full Streamable HTTP: there are no sessions, SSE streams, resumability, server-initiated messages, or heartbeats. One MCP application serves one bound worker principal; multiple policy agents do not turn this adapter into a federated or multi-host transport. Confirm that the selected MCP client can use this stateless POST-only contract.
 
@@ -435,7 +456,7 @@ See [AGENTS.md](AGENTS.md) for the repo layout and rules.
 
 ## What this is not
 
-It is not a general job platform, a remote creation API, a network-fetching agent, a multi-host federation layer, a service-discovery system, replicated storage, consensus, a full Streamable HTTP server, a result-trust boundary, or a substitute for an operator’s TLS, authentication, authorization, backup, and incident-response decisions. See [SECURITY.md](SECURITY.md).
+It is not a general job platform, a remote creation API, a network-fetching agent (the only outbound request is the opt-in webhook wake, which carries ids and no text), a multi-host federation layer, a service-discovery system, replicated storage, consensus, a full Streamable HTTP server, a result-trust boundary, or a substitute for an operator’s TLS, authentication, authorization, backup, and incident-response decisions. See [SECURITY.md](SECURITY.md).
 
 ## License
 

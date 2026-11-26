@@ -23,6 +23,7 @@ agent-bus-remote = "agent_bus_mcp.remote:main"
 agent-bus-enroll = "agent_bus_mcp.enroll:main"
 agent-bus-remote-call = "agent_bus_mcp.remote_call:main"
 agent-bus-hermes-adapt = "agent_bus_mcp.hermes_adapter:main"
+agent-bus = "agent_bus_mcp.setup:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

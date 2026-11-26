@@ -1,7 +1,7 @@
 """Example only. This file is not a package command, and install does not start it.
 
-Subscribe to board.> and reply to each request. A reply takes the post, so the
-bus writes no post file. Also print task.> notices. A task notice is a
+Subscribe to board.> and reply to each request. The post is already written
+before the offer, so a reply only marks it delivered. Also print task.> notices. A task notice is a
 publish, not a request, so this script does not reply to those.
 
     export AGENT_BUS_NATS_URL=nats://127.0.0.1:4222

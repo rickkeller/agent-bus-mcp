@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
-import re
 import secrets
+import time
 from pathlib import Path
 
 from .queue import DurableQueue, QueueRefused, RoutePolicy, _identity, _instant, _parse_stamp
-from .notify import board_subject, offer, publish_wake, task_subject
+from . import webhook
+from .notify import board_subject, offer, publish_wake, task_subject, wake_subject_for_board
 
 CHAT_TTL_SECONDS = 86400
-BOARD_TEXT_BYTES = 2048
+BOARD_TEXT_BYTES = 8192
 BOARD_PAGE_LIMIT = 20
 _KINDS = {"chat": "consultation", "handoff": "task"}
 
@@ -19,26 +20,26 @@ _KINDS = {"chat": "consultation", "handoff": "task"}
 def policy_from_config(document: object) -> RoutePolicy:
     """Build the allowlist. An edge names a sender, a receiver, and chat or handoff."""
     if type(document) is not dict:
-        raise QueueRefused()
+        raise QueueRefused("config is invalid")
     endpoints = document.get("endpoints")
     allow = document.get("allow")
     if type(endpoints) is not list or type(allow) is not list or not endpoints or not allow:
-        raise QueueRefused()
+        raise QueueRefused("config is invalid")
     routes: dict[tuple[str, str], list[str]] = {}
     for edge in allow:
         if type(edge) is not dict or set(edge) != {"from", "to", "kinds"}:
-            raise QueueRefused()
+            raise QueueRefused("config is invalid")
         source, destination, kinds = edge["from"], edge["to"], edge["kinds"]
         if source == destination or type(kinds) is not list or not kinds:
-            raise QueueRefused()
+            raise QueueRefused("config is invalid")
         modes: list[str] = []
         for kind in kinds:
             mode = _KINDS.get(kind)
             if mode is None or mode in modes:
-                raise QueueRefused()
+                raise QueueRefused("config is invalid")
             modes.append(mode)
         if (source, destination) in routes:
-            raise QueueRefused()
+            raise QueueRefused("config is invalid")
         routes[(source, destination)] = modes
     return RoutePolicy(agents=endpoints, routes=routes)
 
@@ -47,7 +48,7 @@ def load_config(path: Path) -> RoutePolicy:
     try:
         document = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise QueueRefused() from exc
+        raise QueueRefused("config is unreadable") from exc
     return policy_from_config(document)
 
 
@@ -71,42 +72,14 @@ def post_chat(queue: DurableQueue, *, to: str, text: str, key: str) -> dict:
     )
 
 
-_BLOCKED = (
-    "secret",
-    "credential",
-    "password",
-    "api key",
-    "spend",
-    "purchase",
-    "outreach",
-    "privilege",
-    "sudo",
-    "live restart",
-    "restart the agent",
-    "restart the process",
-    "gateway restart",
-    "restart gateway",
-    "restart the gateway",
-    "reload gateway",
-)
-
-
-def _blocked(text: str) -> bool:
-    folded = text.casefold()
-    for phrase in _BLOCKED:
-        if " " in phrase:
-            if phrase in folded:
-                return True
-            continue
-        if re.search(r"(?<![a-z0-9])" + re.escape(phrase) + r"(?![a-z0-9])", folded):
-            return True
-    return False
-
-
 def file_accepted(queue: DurableQueue, *, to: str, text: str, caller_id: str, key: str) -> str:
     """File one accepted item. It is text plus the caller. It is work, not a chat."""
-    if caller_id != queue.agent_id or not isinstance(text, str) or not text.strip() or _blocked(text):
-        raise QueueRefused()
+    if caller_id != queue.agent_id:
+        raise QueueRefused("caller is not this endpoint")
+    if not isinstance(text, str):
+        raise QueueRefused("text must be a string")
+    if not text.strip():
+        raise QueueRefused("text is empty")
     return queue.enqueue(goal=text, references=[], idempotency_key=key, destination_id=to)
 
 
@@ -119,7 +92,7 @@ def read_accepted(queue: DurableQueue, *, to: str, key: str) -> dict:
 def post_handoff(queue: DurableQueue, *, to: str, pointer: str, key: str) -> str:
     """Send a pointer. The bus does not carry file bytes and does not fetch the pointer."""
     if type(pointer) is not str or not pointer.startswith("https://"):
-        raise QueueRefused()
+        raise QueueRefused("pointer is invalid")
     return queue.enqueue(
         goal="read the pointer",
         references=[pointer],
@@ -131,18 +104,18 @@ def post_handoff(queue: DurableQueue, *, to: str, pointer: str, key: str) -> str
 def boards_from_config(document: object) -> dict[str, tuple[str, ...]]:
     """A board is a member list. It does not own work and it does not add an edge."""
     if type(document) is not dict:
-        raise QueueRefused()
+        raise QueueRefused("config is invalid")
     endpoints = document.get("endpoints")
     boards = document.get("boards", [])
     if type(endpoints) is not list or type(boards) is not list:
-        raise QueueRefused()
+        raise QueueRefused("config is invalid")
     known = {name for name in endpoints if _identity(name)}
     if len(known) != len(endpoints):
-        raise QueueRefused()
+        raise QueueRefused("config is invalid")
     found: dict[str, tuple[str, ...]] = {}
     for board in boards:
         if type(board) is not dict or set(board) != {"id", "members"}:
-            raise QueueRefused()
+            raise QueueRefused("config is invalid")
         board_id, members = board["id"], board["members"]
         if (
             not _identity(board_id)
@@ -152,7 +125,7 @@ def boards_from_config(document: object) -> dict[str, tuple[str, ...]]:
             or not all(_identity(member) and member in known for member in members)
             or board_id in found
         ):
-            raise QueueRefused()
+            raise QueueRefused("config is invalid")
         found[board_id] = tuple(members)
     return found
 
@@ -161,14 +134,16 @@ def _load_boards(config: Path) -> dict[str, tuple[str, ...]]:
     try:
         document = json.loads(Path(config).read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise QueueRefused() from exc
+        raise QueueRefused("config is unreadable") from exc
     return boards_from_config(document)
 
 
 def _require_member(queue: DurableQueue, config: Path, board: str) -> None:
+    if not _identity(board):
+        raise QueueRefused("board is invalid")
     members = _load_boards(config).get(board)
     if members is None or queue.agent_id not in members:
-        raise QueueRefused()
+        raise QueueRefused("not a member of board %s" % board)
 
 
 def _board_posts_locked(queue: DurableQueue, board: str) -> list[dict]:
@@ -213,20 +188,25 @@ def post_board(
     key: str,
     notify_url: str | None = None,
 ) -> dict:
-    """Post on a board only when nobody takes the live offer.
+    """Write the post first, then offer the text live and wake observers.
 
-    When notify_url is set, the text is offered on board.<board> first. An
-    answer stores the key and does not write a post. Nobody listening, a
-    timeout, or a missing server writes the post and does not offer again.
+    A real post id and seq exist whatever the live path does. When
+    notify_url is set, the written text is offered on board.<board>; an
+    answer marks the result delivered "live" and never suppresses the
+    write. Nobody listening, a timeout, or a missing server marks it
+    "board". Either way one non-consuming wake is published. Answering
+    does not acknowledge the answering member. The same key returns the
+    saved result and does not offer again.
     """
-    if (
-        not isinstance(text, str)
-        or not text.strip()
-        or len(text.encode()) > BOARD_TEXT_BYTES
-        or _blocked(text)
-        or not _safe_key(key)
-    ):
-        raise QueueRefused()
+    if not isinstance(text, str):
+        raise QueueRefused("text must be a string")
+    if not text.strip():
+        raise QueueRefused("text is empty")
+    size = len(text.encode())
+    if size > BOARD_TEXT_BYTES:
+        raise QueueRefused("text is %s bytes, limit is %s" % (size, BOARD_TEXT_BYTES))
+    if not _safe_key(key):
+        raise QueueRefused("key is invalid")
     _require_member(queue, config, board)
     members = _load_boards(config)[board]
     root = queue.root / "boards" / board
@@ -234,67 +214,107 @@ def post_board(
     with queue._locked():
         if key_path.exists():
             saved = queue._read(key_path)
-            if saved.get("delivered") == "nats":
-                return saved["result"]
-            _board_posts_locked(queue, board)
-            post_id = saved["post_id"]
-            for member in members:
-                queue.note_availability(member)
-            return queue._read(root / "posts" / ("%s.json" % post_id))
-    if notify_url:
-        taken = offer(
-            notify_url,
-            board_subject(board),
-            {"kind": "post", "board": board, "author": queue.agent_id, "text": text, "key": key},
-        )
-        if taken == "answered":
-            result = {
-                "post_id": None,
+        else:
+            (root / "posts").mkdir(parents=True, exist_ok=True, mode=0o700)
+            key_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os_chmod(root)
+            existing = _board_posts_locked(queue, board)
+            post_id = "post_" + secrets.token_hex(16)
+            record = {
+                "post_id": post_id,
                 "board": board,
                 "author": queue.agent_id,
                 "text": text,
-                "seq": None,
+                "seq": (existing[-1]["seq"] + 1) if existing else 1,
                 "handoff_id": None,
-                "delivered": "nats",
             }
-            with queue._locked():
-                if key_path.exists():
-                    saved = queue._read(key_path)
-                    if saved.get("delivered") == "nats":
-                        return saved["result"]
-                    return queue._read(root / "posts" / ("%s.json" % saved["post_id"]))
-                key_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                os_chmod(root)
-                queue._write(key_path, {"delivered": "nats", "result": result})
-            return result
-    with queue._locked():
-        if key_path.exists():
-            saved = queue._read(key_path)
-            if saved.get("delivered") == "nats":
-                return saved["result"]
-            post_id = saved["post_id"]
+            queue._write(root / "posts" / ("%s.json" % post_id), record)
+            queue._write(root / "seq.json", {"next": record["seq"] + 1})
+            key_record = {"post_id": post_id, "offering": bool(notify_url)}
+            if notify_url:
+                key_record["offering_since"] = time.time()
+            queue._write(key_path, key_record)
             for member in members:
                 queue.note_availability(member)
-            return queue._read(root / "posts" / ("%s.json" % post_id))
-        (root / "posts").mkdir(parents=True, exist_ok=True, mode=0o700)
-        key_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os_chmod(root)
-        existing = _board_posts_locked(queue, board)
-        post_id = "post_" + secrets.token_hex(16)
-        record = {
-            "post_id": post_id,
-            "board": board,
-            "author": queue.agent_id,
-            "text": text,
-            "seq": (existing[-1]["seq"] + 1) if existing else 1,
-            "handoff_id": None,
-        }
-        queue._write(root / "posts" / ("%s.json" % post_id), record)
-        queue._write(root / "seq.json", {"next": record["seq"] + 1})
-        queue._write(key_path, {"post_id": post_id})
+            saved = None
+    if saved is None:
+        # A fresh post. The live offer and the observer wake run outside the lock.
+        # An opt-in webhook wake is queued first and sent on a background
+        # thread, so it never waits on the offer and never fails the post.
+        webhook.fire_board_post(config, record, members)
+        delivered = "board"
+        if notify_url:
+            outcome = offer(
+                notify_url,
+                board_subject(board),
+                {
+                    "kind": "post",
+                    "board": board,
+                    "author": queue.agent_id,
+                    "text": text,
+                    "key": key,
+                    "post_id": post_id,
+                    "seq": record["seq"],
+                },
+            )
+            if outcome == "answered":
+                delivered = "live"
+            result = {**record, "delivered": delivered}
+            _publish_post(notify_url, record)
+            with queue._locked():
+                queue._write(
+                    key_path,
+                    {"post_id": post_id, "delivered": delivered, "result": result},
+                )
+            return result
+        return record
+    if "delivered" in saved:
+        with queue._locked():
+            for member in members:
+                queue.note_availability(member)
+        return saved["result"]
+    # An existing bare key record: the post exists. While offering is set the
+    # live offer may still be in flight in this process, so wait it out once,
+    # bounded, without holding the queue lock while sleeping. The bound covers
+    # the offer and the wake together; a mark older than that is the record a
+    # crash left behind, resolved once here.
+    post_id = saved["post_id"]
+    marked_at = saved.get("offering_since") or 0.0
+    stale = not isinstance(marked_at, (int, float)) or (time.time() - marked_at) > _OFFERING_WINDOW_SECONDS
+    waited = 0.0
+    while saved.get("offering") and not stale and waited < _OFFERING_WINDOW_SECONDS:
+        time.sleep(0.05)
+        waited += 0.05
+        with queue._locked():
+            saved = queue._read(key_path)
+        if "delivered" in saved:
+            break
+        marked_at = saved.get("offering_since") or marked_at
+        stale = not isinstance(marked_at, (int, float)) or (time.time() - marked_at) > _OFFERING_WINDOW_SECONDS
+    if "delivered" in saved:
+        with queue._locked():
+            for member in members:
+                queue.note_availability(member)
+        return saved["result"]
+    # A stale mark is what a crash left behind, resolved once here. The
+    # writer may have stored its own result between the last loop read and
+    # this lock, so the key is re-read first: a stored result wins, only an
+    # offering-less key gets resolved.
+    with queue._locked():
+        saved = queue._read(key_path)
+        if "delivered" in saved:
+            for member in members:
+                queue.note_availability(member)
+            return saved["result"]
+        record = queue._read(root / "posts" / ("%s.json" % post_id))
+        _board_posts_locked(queue, board)
         for member in members:
             queue.note_availability(member)
-    return record
+        queue._write(
+            key_path,
+            {"post_id": post_id, "delivered": "board", "result": {**record, "delivered": "board"}},
+        )
+        return {**record, "delivered": "board"}
 
 
 def read_board(queue: DurableQueue, *, config: Path, board: str) -> list[dict]:
@@ -351,12 +371,12 @@ def ack_board(queue: DurableQueue, *, config: Path, board: str, post_ids: list[s
         or len(set(post_ids)) != len(post_ids)
         or not all(_post_id(item) for item in post_ids)
     ):
-        raise QueueRefused()
+        raise QueueRefused("posts are invalid")
     with queue._locked():
         records = _board_posts_locked(queue, board)
         known = {record["post_id"] for record in records}
         if any(item not in known for item in post_ids):
-            raise QueueRefused()
+            raise QueueRefused("a post is unknown")
         acked = _acked_posts_locked(queue, board)
         acked.update(post_ids)
         path = _ack_path(queue, board)
@@ -376,12 +396,14 @@ def availability_hint(queue: DurableQueue, *, config: Path, board: str | None) -
     oldest unread first. Names, flags, and counts are the whole hint.
     """
     if not isinstance(queue.agent_id, str):
-        raise QueueRefused()
+        raise QueueRefused("endpoint is invalid")
     boards = _load_boards(config)
     if board is not None:
+        if not _identity(board):
+            raise QueueRefused("board is invalid")
         members = boards.get(board)
         if members is None or queue.agent_id not in members:
-            raise QueueRefused()
+            raise QueueRefused("not a member of board %s" % board)
         selected = [board]
     else:
         selected = [name for name, members in boards.items() if queue.agent_id in members]
@@ -433,14 +455,94 @@ def _task_flags_locked(queue: DurableQueue) -> tuple[bool, bool]:
     return claimable, holding
 
 
+_WAIT_LIMIT_SECONDS = 25
+
+# The live offer waits up to 2 seconds on a subscribed listener; the wake and
+# the bookkeeping add headroom. An offering mark older than this is what a
+# crash left behind, and a replay resolves it to delivered board.
+_OFFERING_WINDOW_SECONDS = 4.0
+
+
+def _unread_wait_limit(arguments: dict) -> tuple[str | None, int]:
+    board = arguments.get("board")
+    if board is not None and not isinstance(board, str):
+        raise QueueRefused("board must be a string")
+    timeout = arguments.get("timeout_seconds", 25)
+    if type(timeout) is not int or not 1 <= timeout <= _WAIT_LIMIT_SECONDS:
+        raise QueueRefused("timeout_seconds is invalid")
+    return board, timeout
+
+
+def wait_unread(
+    queue: DurableQueue,
+    *,
+    config: Path,
+    arguments: dict,
+    notify_url: str | None = None,
+) -> dict:
+    """Hold until this endpoint has unread posts, a claimable task, or a lease.
+
+    The result is a hint. It does not read, acknowledge, claim, or answer,
+    and it does not count this endpoint's own posts. The deadline is fixed
+    when the call starts. Rechecks are at most five seconds and never move
+    the deadline; the parked sleep is woken early by an in-process
+    note_availability bump or, with NATS, by a wake. The queue lock is not
+    held while this sleeps.
+    """
+    if not isinstance(queue.agent_id, str):
+        raise QueueRefused("endpoint is invalid")
+    board, timeout = _unread_wait_limit(arguments)
+    deadline = time.monotonic() + timeout
+    endpoint = queue.agent_id
+    from .availability import bump, release, try_reserve, wait_for_change
+    from .notify import WakeWatch
+
+    boards = _load_boards(config)
+    if board is None:
+        member_boards = [name for name, members in boards.items() if endpoint in members]
+    else:
+        if not _identity(board):
+            raise QueueRefused("board is invalid")
+        members = boards.get(board)
+        if members is None or endpoint not in members:
+            raise QueueRefused("not a member of board %s" % board)
+        member_boards = [board]
+
+    watch = None
+    reserved = False
+    try:
+        while True:
+            _ticket, snap = availability_hint(queue, config=config, board=board)
+            if snap["unread_boards"] or snap["claimable"] or snap["holding_lease"]:
+                return {"status": "ready", **snap}
+            if time.monotonic() >= deadline:
+                return {"status": "timeout", **snap}
+            if not reserved:
+                if not try_reserve(endpoint):
+                    raise QueueRefused("a wait is already open for this endpoint")
+                reserved = True
+                if notify_url:
+                    watch = WakeWatch(notify_url, endpoint, member_boards, on_wake=lambda: bump(endpoint))
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                continue
+            wait_for_change(endpoint, _ticket, min(5.0, remaining))
+    finally:
+        if reserved:
+            release(endpoint)
+        if watch is not None:
+            watch.stop()
+
+
 def _page(records: list[dict], *, after: str | None, limit: int, positions: list[dict] | None = None) -> dict:
     ordered = positions if positions is not None else records
     if after is not None:
         if not _post_id(after):
-            raise QueueRefused()
+            raise QueueRefused("after is invalid")
         match = [record for record in ordered if record.get("post_id") == after]
         if len(match) != 1:
-            raise QueueRefused()
+            raise QueueRefused("after is unknown")
         records = [record for record in records if record["seq"] > match[0]["seq"]]
     page = records[:limit]
     return {
@@ -453,7 +555,7 @@ def _page_limit(limit: int | None) -> int:
     if limit is None:
         return BOARD_PAGE_LIMIT
     if type(limit) is not int or not 1 <= limit <= BOARD_PAGE_LIMIT:
-        raise QueueRefused()
+        raise QueueRefused("limit is invalid")
     return limit
 
 
@@ -496,32 +598,34 @@ def promote_board(
     The task is written with its board link before the queue lock is released.
     A worker cannot claim it until that link, the post, and the sidecar agree.
     """
-    if not _safe_key(key) or not _post_id(post_id):
-        raise QueueRefused()
+    if not _safe_key(key):
+        raise QueueRefused("key is invalid")
+    if not _post_id(post_id):
+        raise QueueRefused("post id is invalid")
+    if not _identity(board):
+        raise QueueRefused("board is invalid")
     members = _load_boards(config).get(board)
     if members is None or queue.agent_id not in members:
-        raise QueueRefused()
+        raise QueueRefused("not a member of board %s" % board)
     destination = queue._destination(to, "task")
     if destination not in members:
-        raise QueueRefused()
+        raise QueueRefused("destination is not a member of board %s" % board)
     post_path = queue.root / "boards" / board / "posts" / ("%s.json" % post_id)
     goal = "promoted %s %s" % (board, post_id)
     with queue._locked():
         post = queue._read(post_path)
         handoff_id = post.get("handoff_id")
-        if (
-            post.get("author") != queue.agent_id
-            or post.get("board") != board
-            or post.get("post_id") != post_id
-        ):
-            raise QueueRefused()
+        if post.get("author") != queue.agent_id:
+            raise QueueRefused("only the author can promote this post")
+        if post.get("board") != board or post.get("post_id") != post_id:
+            raise QueueRefused("post is invalid")
         if handoff_id:
             if (
                 type(handoff_id) is not str
                 or post.get("promote_key") != key
                 or post.get("promote_to") != destination
             ):
-                raise QueueRefused()
+                raise QueueRefused("promotion key or destination does not match")
             task_id = queue._write_promoted_task(
                 goal=goal,
                 destination_id=destination,
@@ -534,7 +638,7 @@ def promote_board(
             queue.note_availability(destination)
             return task_id
         if post.get("promote_key") not in (None, key) or post.get("promote_to") not in (None, destination):
-            raise QueueRefused()
+            raise QueueRefused("promotion key or destination does not match")
         post["promote_key"] = key
         post["promote_to"] = destination
         queue._write(post_path, post)
@@ -549,6 +653,9 @@ def promote_board(
         queue._write(post_path, post)
         _promotion_sidecar(queue, task_id, board, post_id, destination)
         queue.note_availability(destination)
+    webhook.fire_handoff(
+        config, board=board, post_id=post_id, task_id=task_id, author=str(queue.agent_id), destination=destination
+    )
     _publish_task(notify_url, board, post_id, task_id, destination)
     return task_id
 
@@ -573,7 +680,7 @@ def _post_id(value: object) -> bool:
 def _publish_post(url: str | None, record: dict) -> None:
     publish_wake(
         url,
-        board_subject(record.get("board")),
+        wake_subject_for_board(record.get("board")),
         {
             "kind": "post",
             "board": record["board"],

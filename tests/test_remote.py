@@ -233,7 +233,7 @@ def test_tls_host_serves_one_directory_and_retries_safely(tmp_path: Path) -> Non
         assert json.loads(_call(env, tmp_path, port, "south", "poll_unread", "poll-2", board="room").stdout)["posts"]
         witness = _call(env, tmp_path, port, "witness", "post_board", "nope", board="room", text="no", key="nope")
         assert witness.returncode == 2
-        assert witness.stderr.strip() == "request refused"
+        assert witness.stderr.strip() == "request refused: not a member of board room"
         intruder = _call(env, tmp_path, port, "intruder", "poll_unread", "intrude", board="room")
         assert intruder.returncode == 2
         promoted = _call(env, tmp_path, port, "north", "promote_board", "own-1", board="room", post=body["post_id"], key="own")
@@ -311,12 +311,12 @@ def test_remote_read_result_reads_only_for_the_promoter(tmp_path: Path) -> None:
         assert fresh == read
         worker = _call(env, tmp_path, port, "south", "read_result", "read-s", task_id=task_id)
         assert worker.returncode == 2
-        assert worker.stderr.strip() == "request refused"
+        assert worker.stderr.strip() == "request refused: not the promoting endpoint"
         witness = _call(env, tmp_path, port, "witness", "read_result", "read-w", task_id=task_id)
         assert witness.returncode == 2
         mismatch = _call(env, tmp_path, port, "north", "read_result", "read-1", task_id="task_" + "0" * 32)
         assert mismatch.returncode == 2
-        assert mismatch.stderr.strip() == "request refused"
+        assert mismatch.stderr.strip() == "request refused: request id does not match these arguments"
     finally:
         stderr = _stop(server)
     assert "the fix" not in stderr
